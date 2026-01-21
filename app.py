@@ -86,24 +86,141 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Extended stock universe for screening
-STOCK_UNIVERSE = [
-    # Tech
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "INTC", "CRM",
-    "ORCL", "ADBE", "CSCO", "NFLX", "PYPL", "UBER", "SQ", "SHOP", "SNOW", "PLTR",
-    # Finance
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "AXP", "V", "MA", "BLK",
-    # Healthcare
-    "JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY", "TMO", "ABT", "DHR", "BMY",
-    # Consumer
-    "WMT", "PG", "KO", "PEP", "COST", "MCD", "NKE", "SBUX", "TGT", "HD",
-    # Energy
-    "XOM", "CVX", "COP", "SLB", "EOG", "OXY", "MPC", "VLO", "PSX", "KMI",
-    # Industrial
-    "CAT", "DE", "BA", "HON", "UPS", "RTX", "LMT", "GE", "MMM", "UNP",
-    # ETFs
-    "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "XLF", "XLE", "XLK", "XLV",
-]
+# Comprehensive stock universe organized by market cap and sector
+STOCK_UNIVERSE = {
+    # ============ LARGE CAP (>$10B) ============
+    "Large Cap Tech": [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "ORCL", "ADBE",
+        "CRM", "CSCO", "ACN", "IBM", "INTC", "AMD", "QCOM", "TXN", "NOW", "INTU",
+        "AMAT", "MU", "LRCX", "ADI", "KLAC", "SNPS", "CDNS", "MRVL", "NXPI", "FTNT",
+    ],
+    "Large Cap Finance": [
+        "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "SPGI",
+        "CB", "MMC", "PGR", "AON", "MET", "AIG", "TRV", "ALL", "PRU", "AFL",
+        "ICE", "CME", "MCO", "MSCI", "FIS", "COF", "USB", "PNC", "TFC", "BK",
+    ],
+    "Large Cap Healthcare": [
+        "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
+        "AMGN", "GILD", "CVS", "ELV", "CI", "ISRG", "VRTX", "REGN", "MDT", "SYK",
+        "BSX", "ZTS", "BDX", "HUM", "EW", "IDXX", "IQV", "DXCM", "A", "BIIB",
+    ],
+    "Large Cap Consumer": [
+        "WMT", "PG", "KO", "PEP", "COST", "HD", "MCD", "NKE", "SBUX", "TGT",
+        "LOW", "TJX", "BKNG", "MAR", "ORLY", "AZO", "ROST", "DG", "DLTR", "YUM",
+        "CMG", "DHI", "LEN", "NVR", "PHM", "EL", "CL", "KMB", "GIS", "K",
+    ],
+    "Large Cap Energy": [
+        "XOM", "CVX", "COP", "SLB", "EOG", "PXD", "MPC", "VLO", "PSX", "OXY",
+        "WMB", "KMI", "HAL", "DVN", "HES", "BKR", "FANG", "TRGP", "OKE", "LNG",
+    ],
+    "Large Cap Industrial": [
+        "CAT", "DE", "BA", "HON", "UPS", "RTX", "LMT", "GE", "UNP", "ETN",
+        "ITW", "EMR", "PH", "ROK", "CMI", "PCAR", "NSC", "CSX", "WM", "RSG",
+        "AME", "CTAS", "FAST", "ODFL", "TT", "IR", "GWW", "SWK", "DOV", "ROP",
+    ],
+    "Large Cap Communication": [
+        "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "WBD",
+        "PARA", "FOX", "FOXA", "LYV", "MTCH", "ZG", "PINS", "SNAP", "ROKU", "SPOT",
+    ],
+    "Large Cap Real Estate": [
+        "PLD", "AMT", "EQIX", "CCI", "PSA", "O", "WELL", "DLR", "SPG", "VICI",
+        "AVB", "EQR", "VTR", "ARE", "MAA", "UDR", "ESS", "INVH", "SUI", "ELS",
+    ],
+    
+    # ============ MID CAP ($2B-$10B) ============
+    "Mid Cap Tech": [
+        "PLTR", "SNOW", "NET", "DDOG", "ZS", "CRWD", "OKTA", "MDB", "TEAM", "HUBS",
+        "VEEV", "PAYC", "BILL", "PCTY", "DOCU", "ZEN", "ESTC", "GTLB", "PATH", "S",
+        "CFLT", "MNDY", "FROG", "SUMO", "NEWR", "PD", "EVBG", "TENB", "VRNS", "RPD",
+    ],
+    "Mid Cap Finance": [
+        "SIVB", "ZION", "CFG", "KEY", "HBAN", "RF", "FITB", "MTB", "CMA", "PBCT",
+        "FRC", "WAL", "EWBC", "GBCI", "UBSI", "FFIN", "HOPE", "BPOP", "OZK", "BOKF",
+    ],
+    "Mid Cap Healthcare": [
+        "ALGN", "TECH", "CRL", "WST", "HOLX", "DGX", "LH", "RVTY", "EXAS", "NTRA",
+        "RARE", "INCY", "SRPT", "ALNY", "BMRN", "SGEN", "UTHR", "NBIX", "PCVX", "ARWR",
+    ],
+    "Mid Cap Consumer": [
+        "ULTA", "DECK", "LULU", "POOL", "WSM", "RH", "TPR", "GRMN", "HAS", "MAT",
+        "WWW", "SHAK", "WING", "CAVA", "BROS", "TXRH", "CAKE", "DRI", "EAT", "BJRI",
+    ],
+    "Mid Cap Energy": [
+        "AR", "RRC", "CNX", "MTDR", "PR", "CTRA", "SM", "PDCE", "CHRD", "NOG",
+        "GPOR", "VNOM", "DINO", "PBF", "DK", "HFC", "CVI", "PARR", "CLMT", "CAPL",
+    ],
+    "Mid Cap Industrial": [
+        "AXON", "TTC", "SNA", "GNRC", "HUBB", "AOS", "RBC", "MIDD", "SITE", "RRX",
+        "KNX", "SAIA", "XPO", "CHRW", "EXPD", "JBHT", "LSTR", "ARCB", "WERN", "HTLD",
+    ],
+    
+    # ============ SMALL CAP ($300M-$2B) ============
+    "Small Cap Tech": [
+        "APPF", "FIVN", "BL", "DCBO", "ALRM", "AMSF", "BIGC", "PRFT", "KRTX", "DUOL",
+        "SEMR", "RELY", "BRZE", "DV", "IONQ", "QBTS", "RGTI", "QUBT", "LCID", "RIVN",
+        "GOEV", "FSR", "NKLA", "WKHS", "RIDE", "ARVL", "FFIE", "MULN", "VLD", "JOBY",
+    ],
+    "Small Cap Finance": [
+        "CUBI", "PPBI", "BANR", "BY", "SFBS", "TBBK", "CADE", "TOWN", "NWBI", "SBCF",
+        "WAFD", "BUSE", "HTLF", "WSFS", "LBAI", "FBK", "CVBF", "GSBC", "MBWM", "CTBI",
+    ],
+    "Small Cap Healthcare": [
+        "ACAD", "ARVN", "BEAM", "CRNX", "DCPH", "FATE", "GTHX", "HALO", "IMVT", "KYMR",
+        "LEGN", "MGNX", "NUVB", "OMER", "PTGX", "RCKT", "SANA", "TGTX", "VRNA", "XNCR",
+    ],
+    "Small Cap Consumer": [
+        "BOOT", "CROX", "FOXF", "GIII", "HELE", "IPAR", "JJSF", "LCUT", "MGPI", "NATH",
+        "OXM", "PLAY", "RGC", "SBH", "SHOO", "TILE", "VSTO", "WINA", "XPEL", "YETI",
+    ],
+    "Small Cap Energy": [
+        "ALTO", "AMPY", "BORR", "CDEV", "DRLL", "ESTE", "GEVO", "HPK", "IMPP", "KOS",
+        "LEU", "MCF", "NFE", "OAS", "PTEN", "REI", "SWN", "TELL", "USWS", "VET",
+    ],
+    "Small Cap Industrial": [
+        "AIMC", "BWXT", "CECO", "DY", "ESAB", "FELE", "GFF", "HI", "IIIN", "JBT",
+        "KMT", "LNN", "MWA", "NPO", "OSIS", "POWL", "RXO", "SPXC", "THR", "VMI",
+    ],
+    
+    # ============ MICRO CAP (<$300M) ============
+    "Micro Cap Speculative": [
+        "ATER", "BBIG", "CEI", "DWAC", "EXPR", "FAZE", "GME", "HYMC", "IMPP", "KOSS",
+        "MULN", "NAKD", "OCGN", "PROG", "RDBX", "SNDL", "TYDE", "UONE", "VTNR", "WKHS",
+    ],
+    
+    # ============ ETFs BY CATEGORY ============
+    "ETFs - Broad Market": [
+        "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "IVV", "VTV", "VUG", "ITOT",
+        "SCHB", "SPTM", "VV", "MGC", "OEF", "RSP", "SPLG", "VXF", "SCHA", "IJH",
+    ],
+    "ETFs - Sector": [
+        "XLF", "XLE", "XLK", "XLV", "XLY", "XLP", "XLI", "XLB", "XLU", "XLRE",
+        "VGT", "VFH", "VHT", "VCR", "VDC", "VIS", "VAW", "VPU", "VNQ", "VOX",
+    ],
+    "ETFs - Growth/Value": [
+        "VUG", "VTV", "IWF", "IWD", "SPYG", "SPYV", "VOOG", "VOOV", "IVW", "IVE",
+        "MGK", "MGV", "VBK", "VBR", "IWO", "IWN", "SLYG", "SLYV", "IJK", "IJJ",
+    ],
+    "ETFs - International": [
+        "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG", "ACWI", "VXUS", "VEU", "IXUS",
+        "FXI", "EWJ", "EWZ", "EWT", "EWY", "EWG", "EWU", "EWC", "EWA", "EWH",
+    ],
+    "ETFs - Fixed Income": [
+        "BND", "AGG", "LQD", "TLT", "IEF", "SHY", "VCIT", "VCSH", "HYG", "JNK",
+        "TIP", "VTIP", "MUB", "SUB", "BNDX", "EMB", "IGIB", "IGSB", "GOVT", "SCHO",
+    ],
+    "ETFs - Thematic": [
+        "ARKK", "ARKG", "ARKW", "ARKF", "ARKQ", "BOTZ", "ROBO", "HACK", "CIBR", "SKYY",
+        "CLOU", "WCLD", "FINX", "GNOM", "EDOC", "BITO", "BLOK", "DAPP", "IDRV", "DRIV",
+    ],
+    "ETFs - Commodities": [
+        "GLD", "SLV", "IAU", "GLDM", "PPLT", "PALL", "USO", "BNO", "UNG", "DBA",
+        "DBC", "PDBC", "GSG", "COMT", "CPER", "JJC", "WEAT", "CORN", "SOYB", "NIB",
+    ],
+    "ETFs - Leveraged/Inverse": [
+        "TQQQ", "SQQQ", "SPXL", "SPXS", "UPRO", "SPXU", "TNA", "TZA", "LABU", "LABD",
+        "SOXL", "SOXS", "FNGU", "FNGD", "TECL", "TECS", "FAS", "FAZ", "ERX", "ERY",
+    ],
+}
 
 
 def format_number(value, prefix="", suffix="", decimals=2):
@@ -235,14 +352,24 @@ def check_criteria(indicators: dict, criteria: dict) -> bool:
     return True
 
 
+def get_all_symbols():
+    """Get flat list of all symbols."""
+    all_symbols = []
+    for category, symbols in STOCK_UNIVERSE.items():
+        all_symbols.extend(symbols)
+    return list(set(all_symbols))
+
+
 def render_analyzer_tab():
     """Render the Stock Analyzer tab."""
+    all_symbols = get_all_symbols()
+    
     with st.sidebar:
         st.markdown("## ⚙️ Analyzer Settings")
         
         selected_symbols = st.multiselect(
             "Select Stocks",
-            options=STOCK_UNIVERSE[:20],
+            options=sorted(all_symbols),
             default=["AAPL"],
             help="Choose stocks to analyze"
         )
@@ -367,33 +494,105 @@ def render_screener_tab():
     
     st.divider()
     
-    # Stock universe selection
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        sectors = st.multiselect(
-            "Select Sectors to Scan",
-            ["Tech", "Finance", "Healthcare", "Consumer", "Energy", "Industrial", "ETFs"],
-            default=["Tech", "ETFs"]
-        )
-    with col_b:
-        max_stocks = st.number_input("Max Results", min_value=5, max_value=50, value=20)
+    # Market cap selection
+    st.markdown("#### Select Market Cap & Categories")
     
-    # Build stock list based on sectors
+    cap_col1, cap_col2, cap_col3, cap_col4 = st.columns(4)
+    
+    with cap_col1:
+        st.markdown("**🔵 Large Cap**")
+        lc_tech = st.checkbox("Tech", key="lc_tech", value=True)
+        lc_finance = st.checkbox("Finance", key="lc_fin")
+        lc_healthcare = st.checkbox("Healthcare", key="lc_health")
+        lc_consumer = st.checkbox("Consumer", key="lc_cons")
+        lc_energy = st.checkbox("Energy", key="lc_energy")
+        lc_industrial = st.checkbox("Industrial", key="lc_ind")
+        lc_comm = st.checkbox("Communication", key="lc_comm")
+        lc_real_estate = st.checkbox("Real Estate", key="lc_re")
+    
+    with cap_col2:
+        st.markdown("**🟢 Mid Cap**")
+        mc_tech = st.checkbox("Tech", key="mc_tech")
+        mc_finance = st.checkbox("Finance", key="mc_fin")
+        mc_healthcare = st.checkbox("Healthcare", key="mc_health")
+        mc_consumer = st.checkbox("Consumer", key="mc_cons")
+        mc_energy = st.checkbox("Energy", key="mc_energy")
+        mc_industrial = st.checkbox("Industrial", key="mc_ind")
+    
+    with cap_col3:
+        st.markdown("**🟡 Small Cap**")
+        sc_tech = st.checkbox("Tech", key="sc_tech")
+        sc_finance = st.checkbox("Finance", key="sc_fin")
+        sc_healthcare = st.checkbox("Healthcare", key="sc_health")
+        sc_consumer = st.checkbox("Consumer", key="sc_cons")
+        sc_energy = st.checkbox("Energy", key="sc_energy")
+        sc_industrial = st.checkbox("Industrial", key="sc_ind")
+        st.markdown("**🔴 Micro Cap**")
+        micro_spec = st.checkbox("Speculative", key="micro_spec")
+    
+    with cap_col4:
+        st.markdown("**📊 ETFs**")
+        etf_broad = st.checkbox("Broad Market", key="etf_broad", value=True)
+        etf_sector = st.checkbox("Sector", key="etf_sector")
+        etf_growth = st.checkbox("Growth/Value", key="etf_gv")
+        etf_intl = st.checkbox("International", key="etf_intl")
+        etf_fixed = st.checkbox("Fixed Income", key="etf_fixed")
+        etf_thematic = st.checkbox("Thematic", key="etf_theme")
+        etf_commodity = st.checkbox("Commodities", key="etf_comm")
+        etf_leveraged = st.checkbox("Leveraged/Inverse", key="etf_lev")
+    
+    st.divider()
+    
+    # Build stock list based on selections
     stocks_to_scan = []
-    sector_map = {
-        "Tech": STOCK_UNIVERSE[0:20],
-        "Finance": STOCK_UNIVERSE[20:30],
-        "Healthcare": STOCK_UNIVERSE[30:40],
-        "Consumer": STOCK_UNIVERSE[40:50],
-        "Energy": STOCK_UNIVERSE[50:60],
-        "Industrial": STOCK_UNIVERSE[60:70],
-        "ETFs": STOCK_UNIVERSE[70:80],
+    category_selections = {
+        # Large Cap
+        "Large Cap Tech": lc_tech,
+        "Large Cap Finance": lc_finance,
+        "Large Cap Healthcare": lc_healthcare,
+        "Large Cap Consumer": lc_consumer,
+        "Large Cap Energy": lc_energy,
+        "Large Cap Industrial": lc_industrial,
+        "Large Cap Communication": lc_comm,
+        "Large Cap Real Estate": lc_real_estate,
+        # Mid Cap
+        "Mid Cap Tech": mc_tech,
+        "Mid Cap Finance": mc_finance,
+        "Mid Cap Healthcare": mc_healthcare,
+        "Mid Cap Consumer": mc_consumer,
+        "Mid Cap Energy": mc_energy,
+        "Mid Cap Industrial": mc_industrial,
+        # Small Cap
+        "Small Cap Tech": sc_tech,
+        "Small Cap Finance": sc_finance,
+        "Small Cap Healthcare": sc_healthcare,
+        "Small Cap Consumer": sc_consumer,
+        "Small Cap Energy": sc_energy,
+        "Small Cap Industrial": sc_industrial,
+        # Micro Cap
+        "Micro Cap Speculative": micro_spec,
+        # ETFs
+        "ETFs - Broad Market": etf_broad,
+        "ETFs - Sector": etf_sector,
+        "ETFs - Growth/Value": etf_growth,
+        "ETFs - International": etf_intl,
+        "ETFs - Fixed Income": etf_fixed,
+        "ETFs - Thematic": etf_thematic,
+        "ETFs - Commodities": etf_commodity,
+        "ETFs - Leveraged/Inverse": etf_leveraged,
     }
-    for sector in sectors:
-        stocks_to_scan.extend(sector_map.get(sector, []))
+    
+    for category, selected in category_selections.items():
+        if selected and category in STOCK_UNIVERSE:
+            stocks_to_scan.extend(STOCK_UNIVERSE[category])
+    
     stocks_to_scan = list(set(stocks_to_scan))
     
-    st.caption(f"📊 Will scan {len(stocks_to_scan)} stocks")
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        st.caption(f"📊 Will scan **{len(stocks_to_scan)}** stocks across selected categories")
+    with col_b:
+        max_stocks = st.number_input("Max Results", min_value=5, max_value=100, value=30)
     
     # Scan button
     scan_btn = st.button("🚀 Scan Market", type="primary", use_container_width=True)
