@@ -1,14 +1,24 @@
-# Stock OHLCV Analysis and Prediction Tool
+# Stock Analyzer 📈
 
-A Python tool that fetches US stock data from Alpaca Markets, computes technical indicators, and predicts next-period movement using machine learning.
+A web-based stock analysis tool that fetches US stock data from Alpaca Markets, computes technical indicators, and predicts movement using machine learning.
 
 ⚠️ **DISCLAIMER**: Educational purposes only. Not financial advice.
+
+## Features
+
+- **Stock Analyzer**: Analyze individual stocks with ML-powered predictions
+- **Stock Screener**: Scan 500+ stocks across all market caps to find matches based on technical criteria
 
 ## Quick Start
 
 ### 1. Install Dependencies
 
 ```bash
+# Create virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install packages
 pip install -r requirements.txt
 ```
 
@@ -16,114 +26,116 @@ pip install -r requirements.txt
 
 Create a `.env` file in the project root:
 
-```bash
+```env
 ALPACA_API_KEY=your_api_key_here
 ALPACA_API_SECRET=your_api_secret_here
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
 ```
 
-Or export as environment variables:
+Get free API keys at [Alpaca Markets](https://alpaca.markets/) (paper trading account works).
+
+### 3. Run the Web App
 
 ```bash
-export ALPACA_API_KEY=your_api_key_here
-export ALPACA_API_SECRET=your_api_secret_here
-export ALPACA_BASE_URL=https://paper-api.alpaca.markets
+streamlit run app.py
 ```
 
-### 3. Run the Analysis
+The app will open automatically at **http://localhost:8501**
 
-```bash
-# Default: AAPL, MSFT, SPY with classification
-python main.py
+## Using the App
 
-# Custom symbols
-python main.py --symbols AAPL,GOOGL,AMZN
+### 📊 Stock Analyzer Tab
 
-# Regression task with 10-day horizon
-python main.py --symbols SPY --task regression --horizon 10
+1. **Select stocks** from the sidebar dropdown or enter a custom symbol
+2. **Set date range** for historical data
+3. **Adjust prediction horizon** (days ahead to predict)
+4. **Set signal threshold** for buy/sell signals
+5. Click **"Analyze"** to run the analysis
 
-# Without displaying plots (still saves to outputs/)
-python main.py --symbols AAPL --no-show
-```
+**What you'll see:**
+- Current price and RSI status
+- ML prediction (UP/DOWN) with probability
+- Model accuracy metrics
+- Interactive charts (Price, RSI, Predictions)
 
-## CLI Options
+### 🔎 Stock Screener Tab
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--symbols` | `AAPL,MSFT,SPY` | Comma-separated stock symbols |
-| `--start` | `2022-01-01` | Start date (YYYY-MM-DD) |
-| `--end` | today | End date (YYYY-MM-DD) |
-| `--timeframe` | `1Day` | Bar timeframe (1Min, 5Min, 15Min, 30Min, 1Hour, 1Day, 1Week, 1Month) |
-| `--horizon` | `5` | Prediction horizon in bars |
-| `--task` | `classification` | Task type: `classification` or `regression` |
-| `--threshold` | `0.55` | Probability threshold for classification signals |
-| `--cache` | `on` | Enable parquet caching: `on` or `off` |
-| `--no-show` | - | Don't display plots (still saves to outputs/) |
+Find stocks matching your technical criteria across the entire market.
 
-## Technical Indicators
+**Select Technical Criteria:**
+- RSI: Oversold (<30), Overbought (>70), or custom range
+- MACD: Bullish or Bearish histogram
+- SMA Crossover: Golden Cross or Death Cross
+- Bollinger Bands: Near lower/upper bands
+- Price vs SMA: Above/below moving averages
 
-The tool computes the following indicators per symbol:
+**Select Market Segments:**
 
-- **Returns**: 1-day, 5-day, 20-day price returns
-- **SMA**: Simple Moving Averages (20, 50, 200 periods)
-- **EMA**: Exponential Moving Averages (12, 26 periods)
-- **RSI**: Relative Strength Index (14 periods)
-- **MACD**: Moving Average Convergence Divergence (12, 26, 9) with signal and histogram
-- **Bollinger Bands**: (20, 2) with normalized position
-- **ATR**: Average True Range (14 periods)
-- **Volume**: 20-day rolling mean and percent change
+| Market Cap | Description |
+|------------|-------------|
+| 🔵 Large Cap | >$10B - Blue chip stocks |
+| 🟢 Mid Cap | $2B-$10B - Growth stocks |
+| 🟡 Small Cap | $300M-$2B - Emerging stocks |
+| 🔴 Micro Cap | <$300M - Speculative |
+| 📊 ETFs | Index funds, sector funds, leveraged |
 
-## Model Details
+Click **"Scan Market"** to find matching stocks.
 
-### Classification (Default)
-- **Target**: 1 if forward return > 0, else 0
+## Technical Indicators Computed
+
+| Indicator | Description |
+|-----------|-------------|
+| **SMA** | Simple Moving Averages (20, 50, 200) |
+| **EMA** | Exponential Moving Averages (12, 26) |
+| **RSI** | Relative Strength Index (14) |
+| **MACD** | Moving Average Convergence Divergence (12, 26, 9) |
+| **Bollinger Bands** | (20, 2) with position indicator |
+| **ATR** | Average True Range (14) |
+| **Returns** | 1-day, 5-day, 20-day returns |
+| **Volume** | Rolling mean and percent change |
+
+## ML Model
+
+- **Task**: Binary classification (predict UP or DOWN)
 - **Model**: Logistic Regression with StandardScaler
-- **Metrics**: Accuracy, Precision, Recall, F1, Confusion Matrix
-
-### Regression
-- **Target**: Forward return over horizon
-- **Model**: Ridge Regression with StandardScaler
-- **Metrics**: MAE, RMSE, R², Directional Accuracy
-
-### Train/Test Split
-- Time-series safe split (no shuffling)
-- Last ~20% of data used for testing
-
-## Output
-
-### Terminal
-- Rich-formatted summary table with latest indicators and predictions
-- Classification/Regression metrics per symbol
-- Aggregate metrics across all symbols
-
-### Charts (saved to `outputs/`)
-1. **Price Chart**: Close price with SMA20/50/200 and Bollinger Bands
-2. **RSI Chart**: RSI with overbought/oversold zones
-3. **Predictions Chart**:
-   - Classification: Price with bullish/bearish markers
-   - Regression: Predicted vs Actual returns
+- **Split**: Time-series safe (last 20% for testing)
+- **Metrics**: Accuracy, Precision, Recall, F1 Score
 
 ## Project Structure
 
 ```
-stock ana/
-├── main.py              # Entry point with CLI
-├── data_fetcher.py      # Alpaca API + caching
-├── indicators.py        # Technical indicators (pandas-ta)
+stock-analyzer/
+├── app.py               # Streamlit web application
+├── data_fetcher.py      # Alpaca API + parquet caching
+├── indicators.py        # Technical indicator calculations
 ├── model.py             # ML pipeline (scikit-learn)
-├── visualization.py     # Matplotlib charts
-├── display.py           # Rich terminal output
-├── requirements.txt     # Dependencies
-├── outputs/             # Generated charts
-└── cache/               # Parquet cache
+├── charts.py            # Interactive Plotly charts
+├── display.py           # Terminal output utilities
+├── requirements.txt     # Python dependencies
+├── .env                 # API credentials (create this)
+├── cache/               # Cached stock data
+└── outputs/             # Generated charts
 ```
 
 ## Requirements
 
 - Python 3.10+
-- Alpaca Markets account (free paper trading account works)
+- Alpaca Markets account (free paper trading works)
+
+## Troubleshooting
+
+**"No data found" error:**
+- Check your Alpaca API credentials
+- Free accounts use IEX feed (may have delayed/limited data)
+
+**App won't start:**
+- Make sure virtual environment is activated
+- Run `pip install -r requirements.txt` again
+
+**Charts not loading:**
+- Refresh the page
+- Check browser console for errors
 
 ## License
 
 MIT - Educational use only.
-
