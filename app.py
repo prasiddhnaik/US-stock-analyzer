@@ -895,17 +895,20 @@ STOCK_UNIVERSE = {
     
     # ============ MID CAP ($2B-$10B) ============
     "Mid Cap Tech": [
+        # Removed: ZEN (acquired), SUMO (acquired), EVBG (acquired)
         "PLTR", "SNOW", "NET", "DDOG", "ZS", "CRWD", "OKTA", "MDB", "TEAM", "HUBS",
-        "VEEV", "PAYC", "BILL", "PCTY", "DOCU", "ZEN", "ESTC", "GTLB", "PATH", "S",
-        "CFLT", "MNDY", "FROG", "SUMO", "NEWR", "PD", "EVBG", "TENB", "VRNS", "RPD",
+        "VEEV", "PAYC", "BILL", "PCTY", "DOCU", "ESTC", "GTLB", "PATH", "S",
+        "CFLT", "MNDY", "FROG", "NEWR", "PD", "TENB", "VRNS", "RPD",
     ],
     "Mid Cap Finance": [
-        "SIVB", "ZION", "CFG", "KEY", "HBAN", "RF", "FITB", "MTB", "CMA", "PBCT",
-        "FRC", "WAL", "EWBC", "GBCI", "UBSI", "FFIN", "HOPE", "BPOP", "OZK", "BOKF",
+        # Removed: SIVB (collapsed), FRC (collapsed), PBCT (acquired by M&T)
+        "ZION", "CFG", "KEY", "HBAN", "RF", "FITB", "MTB", "CMA",
+        "WAL", "EWBC", "GBCI", "UBSI", "FFIN", "HOPE", "BPOP", "OZK", "BOKF",
     ],
     "Mid Cap Healthcare": [
+        # Removed: SGEN (acquired by Pfizer)
         "ALGN", "TECH", "CRL", "WST", "HOLX", "DGX", "LH", "RVTY", "EXAS", "NTRA",
-        "RARE", "INCY", "SRPT", "ALNY", "BMRN", "SGEN", "UTHR", "NBIX", "PCVX", "ARWR",
+        "RARE", "INCY", "SRPT", "ALNY", "BMRN", "UTHR", "NBIX", "PCVX", "ARWR",
     ],
     "Mid Cap Consumer": [
         "ULTA", "DECK", "LULU", "POOL", "WSM", "RH", "TPR", "GRMN", "HAS", "MAT",
@@ -922,21 +925,25 @@ STOCK_UNIVERSE = {
     
     # ============ SMALL CAP ($300M-$2B) ============
     "Small Cap Tech": [
-        "APPF", "FIVN", "BL", "DCBO", "ALRM", "AMSF", "BIGC", "PRFT", "KRTX", "DUOL",
+        # Removed: PRFT (acquired), GOEV (bankrupt), NKLA (delisted), RIDE (bankrupt), 
+        #          FFIE (delisted), MULN (delisted), FSR (bankrupt), ARVL (delisted)
+        "APPF", "FIVN", "BL", "DCBO", "ALRM", "AMSF", "BIGC", "KRTX", "DUOL",
         "SEMR", "RELY", "BRZE", "DV", "IONQ", "QBTS", "RGTI", "QUBT", "LCID", "RIVN",
-        "GOEV", "FSR", "NKLA", "WKHS", "RIDE", "ARVL", "FFIE", "MULN", "VLD", "JOBY",
+        "WKHS", "VLD", "JOBY",
     ],
     "Small Cap Finance": [
+        # Removed: LBAI (acquired by Provident Financial)
         "CUBI", "PPBI", "BANR", "BY", "SFBS", "TBBK", "CADE", "TOWN", "NWBI", "SBCF",
-        "WAFD", "BUSE", "HTLF", "WSFS", "LBAI", "FBK", "CVBF", "GSBC", "MBWM", "CTBI",
+        "WAFD", "BUSE", "HTLF", "WSFS", "FBK", "CVBF", "GSBC", "MBWM", "CTBI",
     ],
     "Small Cap Healthcare": [
         "ACAD", "ARVN", "BEAM", "CRNX", "DCPH", "FATE", "GTHX", "HALO", "IMVT", "KYMR",
         "LEGN", "MGNX", "NUVB", "OMER", "PTGX", "RCKT", "SANA", "TGTX", "VRNA", "XNCR",
     ],
     "Small Cap Consumer": [
+        # Removed: VSTO (split into Revelyst/Kinetic)
         "BOOT", "CROX", "FOXF", "GIII", "HELE", "IPAR", "JJSF", "LCUT", "MGPI", "NATH",
-        "OXM", "PLAY", "RGC", "SBH", "SHOO", "TILE", "VSTO", "WINA", "XPEL", "YETI",
+        "OXM", "PLAY", "RGC", "SBH", "SHOO", "TILE", "WINA", "XPEL", "YETI",
     ],
     "Small Cap Energy": [
         "ALTO", "AMPY", "BORR", "CDEV", "DRLL", "ESTE", "GEVO", "HPK", "IMPP", "KOS",
