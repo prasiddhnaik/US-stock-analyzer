@@ -5,32 +5,647 @@ Stock Analysis Streamlit Web Application
 
 import streamlit as st
 import pandas as pd
+import numpy as np
+import json
+import threading
+import time
+import random
 from datetime import datetime, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import plotly.graph_objects as go
 
 # Load environment variables
 load_dotenv()
 
 from data_fetcher import fetch_stock_data
-from indicators import prepare_features, get_feature_columns, get_latest_indicators, compute_all_indicators
+from indicators import (
+    prepare_features, get_feature_columns, get_latest_indicators, 
+    compute_all_indicators, compute_screener_indicators, 
+    get_extended_indicators, get_sparkline_data
+)
 from model import train_and_evaluate, predict_latest
 from charts import create_price_chart, create_rsi_chart, create_predictions_chart
+
+
+# =============================================================================
+# Screener Configuration & Constants
+# =============================================================================
+
+# Rate limiting for API calls
+RATE_LIMIT_SEMAPHORE = threading.Semaphore(5)  # Max 5 concurrent fetches
+MIN_FETCH_DELAY = 0.1  # Minimum delay between fetches (seconds)
+
+# Data requirements
+MIN_DATA_POINTS = 50  # Minimum bars needed for basic indicators
+RECOMMENDED_DATA_POINTS = 300  # Recommended for 52-week metrics (400 days fetched)
+
+# Preset schema version for compatibility
+PRESET_SCHEMA_VERSION = 1
+PRESETS_FILE = Path("screener_presets.json")
+
+# Built-in presets
+BUILT_IN_PRESETS = {
+    "Oversold Bounce": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "RSI oversold with bullish MACD",
+        "criteria": {
+            "rsi_oversold": True,
+            "macd_bullish": True,
+        }
+    },
+    "Golden Cross Momentum": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "SMA golden cross with price above SMA50",
+        "criteria": {
+            "sma_golden_cross": True,
+            "above_sma_50": True,
+        }
+    },
+    "Volume Breakout": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "Volume spike with bullish signals",
+        "criteria": {
+            "volume_spike": True,
+            "macd_bullish": True,
+        }
+    },
+    "52-Week Breakout": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "Near 52-week high with strong momentum",
+        "criteria": {
+            "near_52w_high": True,
+            "near_52w_high_pct": 5,
+            "above_sma_200": True,
+        }
+    },
+    "Oversold Value": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "Deep oversold with BB support",
+        "criteria": {
+            "rsi_oversold": True,
+            "bb_oversold": True,
+        }
+    },
+    "Trend Following": {
+        "version": PRESET_SCHEMA_VERSION,
+        "description": "Strong uptrend with aligned SMAs",
+        "criteria": {
+            "sma_bullish_alignment": True,
+            "above_sma_200": True,
+            "macd_bullish": True,
+        }
+    },
+}
+
+
+# =============================================================================
+# Preset Management Functions
+# =============================================================================
+
+def load_all_presets() -> dict:
+    """Load all presets from file, merged with built-in presets."""
+    presets = BUILT_IN_PRESETS.copy()
+    
+    if PRESETS_FILE.exists():
+        try:
+            user_presets = json.loads(PRESETS_FILE.read_text())
+            # Only load presets with matching schema version
+            for name, preset in user_presets.items():
+                if preset.get("version") == PRESET_SCHEMA_VERSION:
+                    presets[name] = preset
+        except (json.JSONDecodeError, Exception):
+            pass  # Ignore corrupt presets file
+    
+    return presets
+
+
+def save_preset(name: str, criteria: dict, description: str = "") -> bool:
+    """Save a preset to file."""
+    try:
+        presets = {}
+        if PRESETS_FILE.exists():
+            try:
+                presets = json.loads(PRESETS_FILE.read_text())
+            except:
+                pass
+        
+        presets[name] = {
+            "version": PRESET_SCHEMA_VERSION,
+            "description": description,
+            "criteria": criteria,
+        }
+        
+        PRESETS_FILE.write_text(json.dumps(presets, indent=2))
+        return True
+    except Exception:
+        return False
+
+
+def delete_preset(name: str) -> bool:
+    """Delete a user preset (cannot delete built-in presets)."""
+    if name in BUILT_IN_PRESETS:
+        return False
+    
+    try:
+        if PRESETS_FILE.exists():
+            presets = json.loads(PRESETS_FILE.read_text())
+            if name in presets:
+                del presets[name]
+                PRESETS_FILE.write_text(json.dumps(presets, indent=2))
+                return True
+    except:
+        pass
+    return False
+
+
+def validate_criteria(criteria: dict) -> dict:
+    """Validate and clamp criteria values to safe ranges."""
+    validated = criteria.copy()
+    
+    # Clamp numeric ranges
+    if "rsi_min" in validated:
+        validated["rsi_min"] = max(0, min(100, validated.get("rsi_min", 0)))
+    if "rsi_max" in validated:
+        validated["rsi_max"] = max(0, min(100, validated.get("rsi_max", 100)))
+    if "near_52w_high_pct" in validated:
+        validated["near_52w_high_pct"] = max(1, min(20, validated.get("near_52w_high_pct", 5)))
+    if "near_52w_low_pct" in validated:
+        validated["near_52w_low_pct"] = max(1, min(50, validated.get("near_52w_low_pct", 10)))
+    if "volume_ratio_min" in validated:
+        validated["volume_ratio_min"] = max(0.5, min(10, validated.get("volume_ratio_min", 1.5)))
+    if "return_1d_min" in validated:
+        validated["return_1d_min"] = max(-50, min(50, validated.get("return_1d_min", -5)))
+    if "return_1d_max" in validated:
+        validated["return_1d_max"] = max(-50, min(50, validated.get("return_1d_max", 5)))
+    
+    return validated
+
+
+# =============================================================================
+# Rate-Limited Data Fetching
+# =============================================================================
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_ohlcv_cached(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """Cached OHLCV data fetch - separates I/O from compute."""
+    return fetch_stock_data(symbol, start, end, "1Day", use_cache=True)
+
+
+def rate_limited_fetch(symbol: str, start: str, end: str) -> tuple:
+    """
+    Rate-limited fetch with jitter to prevent API throttling.
+    Returns (symbol, df, error) tuple.
+    """
+    with RATE_LIMIT_SEMAPHORE:
+        # Add jitter to prevent burst requests
+        time.sleep(random.uniform(MIN_FETCH_DELAY, MIN_FETCH_DELAY * 2))
+        
+        try:
+            df = fetch_ohlcv_cached(symbol, start, end)
+            if df is None:
+                return (symbol, None, "No data returned")
+            if len(df) < MIN_DATA_POINTS:
+                return (symbol, None, f"Insufficient data ({len(df)} bars)")
+            return (symbol, df, None)
+        except Exception as e:
+            return (symbol, None, str(e))
+
+
+# =============================================================================
+# Criteria Engine with Early Exit
+# =============================================================================
+
+def check_criteria_fast(indicators: dict, criteria: dict) -> tuple:
+    """
+    Check if stock matches all criteria with early exit on first failure.
+    Returns (matches: bool, matched_criteria: list) tuple.
+    
+    Criteria are checked in order of computational cost (cheap first).
+    """
+    if indicators is None or indicators.get("error"):
+        return False, []
+    
+    matched = []
+    
+    # =========================================================================
+    # TIER 1: Cheap checks (pre-computed boolean flags)
+    # =========================================================================
+    
+    # RSI criteria
+    rsi = indicators.get("rsi_14")
+    if criteria.get("rsi_oversold"):
+        if rsi is None or rsi > 30:
+            return False, []
+        matched.append("RSI < 30")
+    
+    if criteria.get("rsi_overbought"):
+        if rsi is None or rsi < 70:
+            return False, []
+        matched.append("RSI > 70")
+    
+    if criteria.get("rsi_range"):
+        rsi_min = criteria.get("rsi_min", 0)
+        rsi_max = criteria.get("rsi_max", 100)
+        if rsi is None or not (rsi_min <= rsi <= rsi_max):
+            return False, []
+        matched.append(f"RSI {rsi_min}-{rsi_max}")
+    
+    # MACD criteria
+    macd_hist = indicators.get("macd_hist")
+    if criteria.get("macd_bullish"):
+        if macd_hist is None or macd_hist <= 0:
+            return False, []
+        matched.append("MACD Bullish")
+    
+    if criteria.get("macd_bearish"):
+        if macd_hist is None or macd_hist >= 0:
+            return False, []
+        matched.append("MACD Bearish")
+    
+    # SMA Cross criteria
+    if criteria.get("sma_golden_cross"):
+        if not indicators.get("sma_20_above_50"):
+            return False, []
+        matched.append("Golden Cross")
+    
+    if criteria.get("sma_death_cross"):
+        if indicators.get("sma_20_above_50") is not False:
+            return False, []
+        matched.append("Death Cross")
+    
+    # SMA Bullish Alignment (20 > 50 > 200)
+    if criteria.get("sma_bullish_alignment"):
+        if not indicators.get("sma_bullish_alignment"):
+            return False, []
+        matched.append("SMA Aligned")
+    
+    # =========================================================================
+    # TIER 2: Moderate cost checks (simple comparisons)
+    # =========================================================================
+    
+    # Bollinger Band criteria
+    bb_pos = indicators.get("bb_position")
+    if criteria.get("bb_oversold"):
+        if bb_pos is None or bb_pos > 0.2:
+            return False, []
+        matched.append("BB Oversold")
+    
+    if criteria.get("bb_overbought"):
+        if bb_pos is None or bb_pos < 0.8:
+            return False, []
+        matched.append("BB Overbought")
+    
+    # Price vs SMA criteria
+    if criteria.get("above_sma_20"):
+        if not indicators.get("above_sma_20"):
+            return False, []
+        matched.append("Above SMA20")
+    
+    if criteria.get("below_sma_20"):
+        if indicators.get("above_sma_20") is not False:
+            return False, []
+        matched.append("Below SMA20")
+    
+    if criteria.get("above_sma_50"):
+        if not indicators.get("above_sma_50"):
+            return False, []
+        matched.append("Above SMA50")
+    
+    if criteria.get("below_sma_50"):
+        if indicators.get("above_sma_50") is not False:
+            return False, []
+        matched.append("Below SMA50")
+    
+    if criteria.get("above_sma_200"):
+        if not indicators.get("above_sma_200"):
+            return False, []
+        matched.append("Above SMA200")
+    
+    if criteria.get("below_sma_200"):
+        if indicators.get("above_sma_200") is not False:
+            return False, []
+        matched.append("Below SMA200")
+    
+    # EMA crossover criteria
+    if criteria.get("ema_bullish_cross"):
+        if not indicators.get("recent_bullish_cross"):
+            return False, []
+        matched.append("EMA Bull Cross")
+    
+    if criteria.get("ema_bearish_cross"):
+        if not indicators.get("recent_bearish_cross"):
+            return False, []
+        matched.append("EMA Bear Cross")
+    
+    # =========================================================================
+    # TIER 3: Volume criteria
+    # =========================================================================
+    
+    volume_ratio = indicators.get("volume_ratio")
+    if criteria.get("volume_spike"):
+        if volume_ratio is None or volume_ratio < 1.5:
+            return False, []
+        matched.append("Volume Spike")
+    
+    if criteria.get("volume_above_avg"):
+        vol_min = criteria.get("volume_ratio_min", 1.0)
+        if volume_ratio is None or volume_ratio < vol_min:
+            return False, []
+        matched.append(f"Vol > {vol_min}x")
+    
+    if criteria.get("volume_below_avg"):
+        if volume_ratio is None or volume_ratio >= 1.0:
+            return False, []
+        matched.append("Low Volume")
+    
+    # =========================================================================
+    # TIER 4: Return criteria
+    # =========================================================================
+    
+    if criteria.get("return_1d_positive"):
+        ret_1d = indicators.get("return_1d")
+        if ret_1d is None or ret_1d <= 0:
+            return False, []
+        matched.append("1D Up")
+    
+    if criteria.get("return_1d_negative"):
+        ret_1d = indicators.get("return_1d")
+        if ret_1d is None or ret_1d >= 0:
+            return False, []
+        matched.append("1D Down")
+    
+    if criteria.get("return_1d_range"):
+        ret_1d = indicators.get("return_1d")
+        ret_min = criteria.get("return_1d_min", -100) / 100
+        ret_max = criteria.get("return_1d_max", 100) / 100
+        if ret_1d is None or not (ret_min <= ret_1d <= ret_max):
+            return False, []
+        matched.append(f"1D {ret_min*100:.0f}%-{ret_max*100:.0f}%")
+    
+    # =========================================================================
+    # TIER 5: 52-week criteria (expensive - requires full lookback)
+    # =========================================================================
+    
+    if criteria.get("near_52w_high"):
+        pct_from_high = indicators.get("pct_from_52w_high")
+        threshold = criteria.get("near_52w_high_pct", 5)
+        if pct_from_high is None or abs(pct_from_high) > threshold:
+            return False, []
+        matched.append(f"Near 52W High")
+    
+    if criteria.get("near_52w_low"):
+        pct_from_low = indicators.get("pct_from_52w_low")
+        threshold = criteria.get("near_52w_low_pct", 10)
+        if pct_from_low is None or pct_from_low > threshold:
+            return False, []
+        matched.append(f"Near 52W Low")
+    
+    # =========================================================================
+    # TIER 6: ATR / Volatility criteria
+    # =========================================================================
+    
+    if criteria.get("high_volatility"):
+        atr_pctl = indicators.get("atr_percentile")
+        if atr_pctl is None or atr_pctl < 70:
+            return False, []
+        matched.append("High Vol")
+    
+    if criteria.get("low_volatility"):
+        atr_pctl = indicators.get("atr_percentile")
+        if atr_pctl is None or atr_pctl > 30:
+            return False, []
+        matched.append("Low Vol")
+    
+    # =========================================================================
+    # TIER 7: Consecutive days criteria
+    # =========================================================================
+    
+    if criteria.get("consecutive_up"):
+        consec = indicators.get("consecutive_days", 0)
+        min_days = criteria.get("consecutive_up_min", 3)
+        if consec < min_days:
+            return False, []
+        matched.append(f"{consec}D Up Streak")
+    
+    if criteria.get("consecutive_down"):
+        consec = indicators.get("consecutive_days", 0)
+        min_days = criteria.get("consecutive_down_min", 3)
+        if consec > -min_days:
+            return False, []
+        matched.append(f"{abs(consec)}D Down Streak")
+    
+    # If we got here, all criteria passed
+    return True, matched
+
+
+def get_active_criteria_list(criteria: dict) -> list:
+    """Get list of human-readable active criteria for display."""
+    active = []
+    
+    if criteria.get("rsi_oversold"):
+        active.append("RSI < 30")
+    if criteria.get("rsi_overbought"):
+        active.append("RSI > 70")
+    if criteria.get("rsi_range"):
+        active.append(f"RSI {criteria.get('rsi_min', 0)}-{criteria.get('rsi_max', 100)}")
+    if criteria.get("macd_bullish"):
+        active.append("MACD Bullish")
+    if criteria.get("macd_bearish"):
+        active.append("MACD Bearish")
+    if criteria.get("sma_golden_cross"):
+        active.append("Golden Cross")
+    if criteria.get("sma_death_cross"):
+        active.append("Death Cross")
+    if criteria.get("sma_bullish_alignment"):
+        active.append("SMA Aligned")
+    if criteria.get("bb_oversold"):
+        active.append("BB Oversold")
+    if criteria.get("bb_overbought"):
+        active.append("BB Overbought")
+    if criteria.get("above_sma_20"):
+        active.append("Above SMA20")
+    if criteria.get("below_sma_20"):
+        active.append("Below SMA20")
+    if criteria.get("above_sma_50"):
+        active.append("Above SMA50")
+    if criteria.get("below_sma_50"):
+        active.append("Below SMA50")
+    if criteria.get("above_sma_200"):
+        active.append("Above SMA200")
+    if criteria.get("below_sma_200"):
+        active.append("Below SMA200")
+    if criteria.get("ema_bullish_cross"):
+        active.append("EMA Bull Cross")
+    if criteria.get("ema_bearish_cross"):
+        active.append("EMA Bear Cross")
+    if criteria.get("volume_spike"):
+        active.append("Volume Spike")
+    if criteria.get("volume_above_avg"):
+        active.append(f"Vol > {criteria.get('volume_ratio_min', 1.5)}x")
+    if criteria.get("near_52w_high"):
+        active.append(f"Near 52W High ({criteria.get('near_52w_high_pct', 5)}%)")
+    if criteria.get("near_52w_low"):
+        active.append(f"Near 52W Low ({criteria.get('near_52w_low_pct', 10)}%)")
+    if criteria.get("high_volatility"):
+        active.append("High Volatility")
+    if criteria.get("low_volatility"):
+        active.append("Low Volatility")
+    if criteria.get("consecutive_up"):
+        active.append(f"{criteria.get('consecutive_up_min', 3)}+ Up Days")
+    if criteria.get("consecutive_down"):
+        active.append(f"{criteria.get('consecutive_down_min', 3)}+ Down Days")
+    
+    return active
+
+
+# =============================================================================
+# Screener Scanning Functions
+# =============================================================================
+
+def scan_single_stock(symbol: str, start: str, end: str, criteria: dict) -> tuple:
+    """
+    Scan a single stock with rate limiting and error handling.
+    Returns (symbol, indicators, matched_criteria, error) tuple.
+    """
+    # Fetch with rate limiting
+    sym, df, fetch_error = rate_limited_fetch(symbol, start, end)
+    
+    if fetch_error:
+        return (symbol, None, [], fetch_error)
+    
+    try:
+        # Compute indicators (sequential, not in thread pool)
+        df_indicators = compute_screener_indicators(df)
+        indicators = get_extended_indicators(df_indicators, symbol)
+        
+        # Store sparkline data
+        indicators["sparkline"] = get_sparkline_data(df, periods=30)
+        
+        # Check criteria with early exit
+        matches, matched_criteria = check_criteria_fast(indicators, criteria)
+        
+        if matches:
+            return (symbol, indicators, matched_criteria, None)
+        else:
+            return (symbol, None, [], None)  # Didn't match, not an error
+            
+    except Exception as e:
+        return (symbol, None, [], str(e))
+
+
+def parallel_scan_stocks(
+    symbols: list, 
+    start: str, 
+    end: str, 
+    criteria: dict,
+    max_results: int = 50,
+    progress_callback=None
+) -> tuple:
+    """
+    Scan multiple stocks in parallel with rate limiting.
+    
+    Returns (matches, errors, scanned_count) tuple.
+    """
+    matches = []
+    errors = {}
+    scanned = 0
+    total = len(symbols)
+    
+    # Use ThreadPoolExecutor for I/O-bound fetch operations
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all fetch jobs
+        futures = {
+            executor.submit(scan_single_stock, sym, start, end, criteria): sym 
+            for sym in symbols
+        }
+        
+        # Process results as they complete
+        for future in as_completed(futures):
+            symbol = futures[future]
+            scanned += 1
+            
+            try:
+                sym, indicators, matched_criteria, error = future.result()
+                
+                if error:
+                    errors[sym] = error
+                elif indicators is not None:
+                    indicators["matched_criteria"] = matched_criteria
+                    matches.append(indicators)
+                    
+                    # Early exit if we have enough matches
+                    if len(matches) >= max_results:
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        break
+                        
+            except Exception as e:
+                errors[symbol] = str(e)
+            
+            # Update progress
+            if progress_callback:
+                progress_callback(scanned, total, symbol, len(matches))
+    
+    return matches, errors, scanned
+
+
+# =============================================================================
+# Sparkline Chart Generation
+# =============================================================================
+
+def create_sparkline(prices: list, width: int = 120, height: int = 40) -> go.Figure:
+    """Create a minimal sparkline chart for price data."""
+    if not prices or len(prices) < 2:
+        return None
+    
+    # Determine color based on trend
+    is_up = prices[-1] >= prices[0]
+    color = "#22c55e" if is_up else "#ef4444"
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        y=prices,
+        mode='lines',
+        line=dict(color=color, width=1.5),
+        fill='tozeroy',
+        fillcolor=f"rgba({34 if is_up else 239}, {197 if is_up else 68}, {94 if is_up else 68}, 0.2)",
+        hoverinfo='skip'
+    ))
+    
+    fig.update_layout(
+        width=width,
+        height=height,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        showlegend=False,
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+    )
+    
+    return fig
 
 # Page configuration
 st.set_page_config(
     page_title="Stock Analyzer",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS
 st.markdown("""
 <style>
+    /* Hide header and sidebar */
     header[data-testid="stHeader"] { display: none !important; }
     .stApp > header { display: none !important; }
-    .block-container { padding-top: 1rem !important; }
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    .block-container { padding-top: 1rem !important; max-width: 100% !important; }
     .stApp { background: linear-gradient(135deg, #0a0a12 0%, #12121f 100%); }
     .stApp, .stApp p, .stApp span, .stApp label, .stApp div { color: #ffffff !important; }
     .main-header {
@@ -46,8 +661,6 @@ st.markdown("""
     [data-testid="stMetricValue"] { color: #ffffff !important; font-size: 1.8rem !important; }
     [data-testid="stMetricLabel"] { color: #cbd5e1 !important; }
     [data-testid="stMetricDelta"] { font-size: 0.9rem !important; }
-    [data-testid="stSidebar"] { background: rgba(15, 15, 25, 0.95); }
-    [data-testid="stSidebar"] label { color: #ffffff !important; }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         background-color: rgba(30, 30, 50, 0.8);
@@ -83,6 +696,106 @@ st.markdown("""
     }
     .match-bullish { border-left: 4px solid #22c55e !important; }
     .match-bearish { border-left: 4px solid #ef4444 !important; }
+    
+    /* Screener-specific styles */
+    .screener-filter-section {
+        background: rgba(25, 25, 40, 0.6);
+        border-radius: 8px;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .screener-result-highlight {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+        border-radius: 8px;
+        padding: 1rem;
+    }
+    .metric-positive { color: #22c55e !important; }
+    .metric-negative { color: #ef4444 !important; }
+    .preset-tag {
+        background: rgba(99, 102, 241, 0.2);
+        border: 1px solid rgba(99, 102, 241, 0.4);
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        margin-right: 0.25rem;
+    }
+    
+    /* Data table styling */
+    .stDataFrame {
+        background: rgba(20, 20, 35, 0.8) !important;
+    }
+    .stDataFrame td, .stDataFrame th {
+        color: #ffffff !important;
+    }
+    
+    /* Selectbox styling - fix white on white issue */
+    [data-baseweb="select"] {
+        background-color: rgba(30, 30, 50, 0.9) !important;
+    }
+    [data-baseweb="select"] > div {
+        background-color: rgba(30, 30, 50, 0.9) !important;
+        color: #ffffff !important;
+    }
+    [data-baseweb="select"] span {
+        color: #cbd5e1 !important;
+    }
+    [data-baseweb="popover"] {
+        background-color: rgba(25, 25, 40, 0.98) !important;
+    }
+    [data-baseweb="popover"] li {
+        background-color: rgba(25, 25, 40, 0.98) !important;
+        color: #ffffff !important;
+    }
+    [data-baseweb="popover"] li:hover {
+        background-color: rgba(99, 102, 241, 0.3) !important;
+    }
+    [role="listbox"] {
+        background-color: rgba(25, 25, 40, 0.98) !important;
+    }
+    [role="option"] {
+        color: #ffffff !important;
+    }
+    
+    /* Expander styling - fix white background */
+    [data-testid="stExpander"] {
+        background-color: rgba(25, 25, 40, 0.8) !important;
+        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stExpander"] > div {
+        background-color: transparent !important;
+    }
+    [data-testid="stExpander"] summary {
+        background-color: rgba(30, 30, 50, 0.9) !important;
+        color: #ffffff !important;
+    }
+    [data-testid="stExpander"] details {
+        background-color: rgba(25, 25, 40, 0.8) !important;
+    }
+    .streamlit-expanderHeader {
+        background-color: rgba(30, 30, 50, 0.9) !important;
+        color: #ffffff !important;
+    }
+    .streamlit-expanderContent {
+        background-color: rgba(25, 25, 40, 0.6) !important;
+    }
+    
+    /* Checkbox label styling */
+    [data-testid="stCheckbox"] label {
+        color: #e2e8f0 !important;
+    }
+    
+    /* Input/Number input styling */
+    [data-testid="stNumberInput"] input {
+        background-color: rgba(30, 30, 50, 0.9) !important;
+        color: #ffffff !important;
+        border-color: rgba(99, 102, 241, 0.4) !important;
+    }
+    
+    /* Slider styling */
+    [data-testid="stSlider"] > div > div {
+        color: #cbd5e1 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -280,78 +993,6 @@ def fetch_and_analyze(symbol: str, start: str, end: str, horizon: int):
         return None, str(e)
 
 
-@st.cache_data(ttl=600)
-def scan_stock(symbol: str, start: str, end: str):
-    """Scan a single stock and return its indicators."""
-    try:
-        df = fetch_stock_data(symbol, start, end, "1Day", use_cache=True)
-        if df is None or len(df) < 50:
-            return None
-        
-        df_indicators = compute_all_indicators(df)
-        indicators = get_latest_indicators(df_indicators)
-        indicators["symbol"] = symbol
-        return indicators
-    except:
-        return None
-
-
-def check_criteria(indicators: dict, criteria: dict) -> bool:
-    """Check if stock matches all criteria."""
-    if indicators is None:
-        return False
-    
-    # RSI criteria
-    if criteria.get("rsi_oversold") and (indicators.get("rsi_14") is None or indicators.get("rsi_14") > 30):
-        return False
-    if criteria.get("rsi_overbought") and (indicators.get("rsi_14") is None or indicators.get("rsi_14") < 70):
-        return False
-    if criteria.get("rsi_range"):
-        rsi = indicators.get("rsi_14")
-        if rsi is None or not (criteria["rsi_min"] <= rsi <= criteria["rsi_max"]):
-            return False
-    
-    # MACD criteria
-    if criteria.get("macd_bullish") and (indicators.get("macd_hist") is None or indicators.get("macd_hist") <= 0):
-        return False
-    if criteria.get("macd_bearish") and (indicators.get("macd_hist") is None or indicators.get("macd_hist") >= 0):
-        return False
-    
-    # SMA Cross criteria
-    if criteria.get("sma_golden_cross") and not indicators.get("sma_20_above_50"):
-        return False
-    if criteria.get("sma_death_cross") and indicators.get("sma_20_above_50") != False:
-        return False
-    
-    # Bollinger Band criteria
-    bb_pos = indicators.get("bb_position")
-    if criteria.get("bb_oversold") and (bb_pos is None or bb_pos > 0.2):
-        return False
-    if criteria.get("bb_overbought") and (bb_pos is None or bb_pos < 0.8):
-        return False
-    
-    # Price above/below SMA
-    close = indicators.get("close")
-    if criteria.get("above_sma_20"):
-        sma20 = indicators.get("sma_20")
-        if close is None or sma20 is None or close <= sma20:
-            return False
-    if criteria.get("below_sma_20"):
-        sma20 = indicators.get("sma_20")
-        if close is None or sma20 is None or close >= sma20:
-            return False
-    if criteria.get("above_sma_50"):
-        sma50 = indicators.get("sma_50")
-        if close is None or sma50 is None or close <= sma50:
-            return False
-    if criteria.get("below_sma_50"):
-        sma50 = indicators.get("sma_50")
-        if close is None or sma50 is None or close >= sma50:
-            return False
-    
-    return True
-
-
 def get_all_symbols():
     """Get flat list of all symbols."""
     all_symbols = []
@@ -361,45 +1002,87 @@ def get_all_symbols():
 
 
 def render_analyzer_tab():
-    """Render the Stock Analyzer tab."""
+    """Render the Stock Analyzer tab with integrated controls."""
     all_symbols = get_all_symbols()
     
-    with st.sidebar:
-        st.markdown("## ⚙️ Analyzer Settings")
-        
+    # Initialize session state for analyzer results
+    if "analyzer_results" not in st.session_state:
+        st.session_state.analyzer_results = None
+    if "analyzer_symbols" not in st.session_state:
+        st.session_state.analyzer_symbols = []
+    if "analyzer_horizon" not in st.session_state:
+        st.session_state.analyzer_horizon = 5
+    if "analyzer_threshold" not in st.session_state:
+        st.session_state.analyzer_threshold = 0.55
+    
+    st.markdown("### 📊 Stock Analyzer")
+    st.markdown("ML-powered analysis with technical indicators and price predictions.")
+    
+    st.divider()
+    
+    # ==========================================================================
+    # ANALYZER CONTROLS - Integrated into main page
+    # ==========================================================================
+    
+    # Row 1: Stock Selection
+    stock_col1, stock_col2 = st.columns([3, 1])
+    
+    with stock_col1:
         selected_symbols = st.multiselect(
-            "Select Stocks",
+            "Select Stocks to Analyze",
             options=sorted(all_symbols),
             default=["AAPL"],
-            help="Choose stocks to analyze"
+            help="Choose one or more stocks to analyze",
+            key="analyzer_stock_select"
         )
         
+    with stock_col2:
         custom_symbol = st.text_input(
-            "Or enter custom symbol",
+            "Add Custom Symbol",
             placeholder="e.g., GOOG",
+            key="analyzer_custom"
         ).upper().strip()
         
         if custom_symbol and custom_symbol not in selected_symbols:
             selected_symbols.append(custom_symbol)
         
-        st.divider()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("Start", value=datetime(2022, 1, 1))
-        with col2:
-            end_date = st.date_input("End", value=datetime.now())
-        
-        horizon = st.slider("Prediction Horizon (days)", 1, 20, 5)
-        threshold = st.slider("Signal Threshold", 0.5, 0.8, 0.55, 0.05)
-        
-        st.divider()
-        analyze_btn = st.button("🔍 Analyze", type="primary", use_container_width=True, disabled=len(selected_symbols) == 0)
+    # Row 2: Date Range and Parameters
+    param_col1, param_col2, param_col3, param_col4 = st.columns(4)
+    
+    with param_col1:
+        start_date = st.date_input("Start Date", value=datetime(2022, 1, 1), key="analyzer_start")
+    
+    with param_col2:
+        end_date = st.date_input("End Date", value=datetime.now(), key="analyzer_end")
+    
+    with param_col3:
+        horizon = st.slider("Prediction Horizon", 1, 20, 5, key="analyzer_horizon_slider",
+                           help="Days ahead to predict")
+    
+    with param_col4:
+        threshold = st.slider("Signal Threshold", 0.5, 0.8, 0.55, 0.05, key="analyzer_threshold_slider",
+                             help="Confidence threshold for signals")
+    
+    # Analyze Button
+    analyze_btn = st.button("🔍 Analyze Selected Stocks", type="primary", use_container_width=True, 
+                            disabled=len(selected_symbols) == 0)
+    
+    st.divider()
+    
+    # ==========================================================================
+    # ANALYSIS RESULTS
+    # ==========================================================================
     
     if analyze_btn and selected_symbols:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
         
+        # Store for reference
+        st.session_state.analyzer_symbols = selected_symbols
+        st.session_state.analyzer_horizon = horizon
+        st.session_state.analyzer_threshold = threshold
+        
+        # Create tabs for each symbol
         tabs = st.tabs(selected_symbols)
         
         for tab, symbol in zip(tabs, selected_symbols):
@@ -418,84 +1101,281 @@ def render_analyzer_tab():
                 model_results = result["results"]
                 
                 # Overview metrics
-                st.markdown("### 📊 Overview")
-                col1, col2, col3, col4 = st.columns(4)
+                st.markdown("#### 📈 Key Metrics")
+                m1, m2, m3, m4 = st.columns(4)
                 
-                with col1:
+                with m1:
                     st.metric("Current Price", format_number(indicators.get("close"), prefix="$"))
-                with col2:
+                with m2:
                     rsi = indicators.get("rsi_14")
                     rsi_status, _ = get_rsi_status(rsi)
                     st.metric("RSI (14)", format_number(rsi, decimals=1), delta=rsi_status)
-                with col3:
-                    direction = "↑ UP" if prediction == 1 else "↓ DOWN"
-                    st.metric(f"{horizon}-Day Prediction", direction, delta=f"{probability:.1%} prob" if probability else None)
-                with col4:
+                with m3:
+                    direction = "📈 UP" if prediction == 1 else "📉 DOWN"
+                    st.metric(f"{horizon}-Day Prediction", direction, delta=f"{probability:.1%}" if probability else None)
+                with m4:
                     st.metric("Model Accuracy", f"{model_results.metrics.get('accuracy', 0):.1%}")
                 
                 st.divider()
                 
                 # Charts
-                st.markdown("### 📉 Charts")
+                st.markdown("#### 📉 Price & Indicators")
                 price_fig = create_price_chart(df, symbol)
                 st.plotly_chart(price_fig, use_container_width=True)
                 
-                c1, c2 = st.columns(2)
-                with c1:
+                chart_col1, chart_col2 = st.columns(2)
+                with chart_col1:
                     st.plotly_chart(create_rsi_chart(df, symbol), use_container_width=True)
-                with c2:
+                with chart_col2:
                     st.plotly_chart(create_predictions_chart(df, symbol, model_results.predictions, model_results.probabilities, model_results.test_indices, threshold), use_container_width=True)
     
-    elif not st.session_state.get("screener_active"):
-        st.info("👈 Select stocks from the sidebar and click 'Analyze'")
+    elif not selected_symbols:
+        st.info("👆 Select stocks from the dropdown above and click 'Analyze' to begin.")
 
 
 def render_screener_tab():
-    """Render the Stock Screener tab."""
+    """Render the Stock Screener tab with comprehensive filters and hybrid UI."""
+    
+    # Initialize session state for screener
+    if "screener_results" not in st.session_state:
+        st.session_state.screener_results = None
+    if "screener_ohlcv_cache" not in st.session_state:
+        st.session_state.screener_ohlcv_cache = {}
+    if "last_loaded_preset" not in st.session_state:
+        st.session_state.last_loaded_preset = None
+    
     st.markdown("### 🔎 Stock Screener")
-    st.markdown("Find stocks matching your technical criteria from the market.")
+    st.markdown("Find stocks matching your technical criteria with parallel scanning and ML predictions.")
+    
+    # ==========================================================================
+    # PRESET SELECTOR
+    # ==========================================================================
     
     st.divider()
     
-    # Criteria selection
-    st.markdown("#### Select Criteria")
+    # Preset controls - symmetrical two-column layout
+    presets = load_all_presets()
+    preset_names = ["-- Select Preset --"] + list(presets.keys())
     
+    # Handle pending clear action BEFORE widget creation
+    if st.session_state.get("pending_clear", False):
+        filter_keys = [
+            "rsi_os", "rsi_ob", "rsi_range", "macd_bull", "macd_bear",
+            "bb_os", "bb_ob", "sma_golden", "sma_death", "sma_align",
+            "above_20", "below_20", "above_50", "below_50", "above_200", "below_200",
+            "ema_bull", "ema_bear", "vol_spike", "vol_above", "vol_below",
+            "near_high", "near_low", "high_vol", "low_vol",
+            "consec_up", "consec_down", "ret_pos", "ret_neg", "enable_ml"
+        ]
+        for key in filter_keys:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.session_state.last_loaded_preset = None
+        st.session_state.pending_clear = False
+    
+    preset_col1, preset_col2 = st.columns(2)
+    
+    with preset_col1:
+        # Load preset controls
+        load_sub1, load_sub2 = st.columns([2, 1])
+        with load_sub1:
+            selected_preset = st.selectbox("📋 Load Preset", preset_names, key="preset_select", label_visibility="collapsed")
+        with load_sub2:
+            if st.button("🗑️ Clear", use_container_width=True, key="clear_all"):
+                st.session_state.pending_clear = True
+                st.rerun()
+    
+    with preset_col2:
+        # Preset description display
+        if selected_preset != "-- Select Preset --":
+            preset_data = presets.get(selected_preset, {})
+            st.caption(f"ℹ️ {preset_data.get('description', '')}")
+    
+    # Apply preset criteria when a NEW preset is selected
+    if selected_preset != "-- Select Preset --" and selected_preset != st.session_state.last_loaded_preset:
+        preset_criteria = presets.get(selected_preset, {}).get("criteria", {})
+        
+        # Map preset criteria to session state keys
+        key_mapping = {
+            "rsi_oversold": "rsi_os",
+            "rsi_overbought": "rsi_ob",
+            "rsi_range": "rsi_range",
+            "macd_bullish": "macd_bull",
+            "macd_bearish": "macd_bear",
+            "bb_oversold": "bb_os",
+            "bb_overbought": "bb_ob",
+            "sma_golden_cross": "sma_golden",
+            "sma_death_cross": "sma_death",
+            "sma_bullish_alignment": "sma_align",
+            "above_sma_20": "above_20",
+            "below_sma_20": "below_20",
+            "above_sma_50": "above_50",
+            "below_sma_50": "below_50",
+            "above_sma_200": "above_200",
+            "below_sma_200": "below_200",
+            "ema_bullish_cross": "ema_bull",
+            "ema_bearish_cross": "ema_bear",
+            "volume_spike": "vol_spike",
+            "volume_above_avg": "vol_above",
+            "volume_below_avg": "vol_below",
+            "near_52w_high": "near_high",
+            "near_52w_low": "near_low",
+            "high_volatility": "high_vol",
+            "low_volatility": "low_vol",
+            "consecutive_up": "consec_up",
+            "consecutive_down": "consec_down",
+            "return_1d_positive": "ret_pos",
+            "return_1d_negative": "ret_neg",
+        }
+        
+        # Clear all filter keys first
+        for session_key in key_mapping.values():
+            st.session_state[session_key] = False
+        
+        # Apply the preset values
+        for criteria_key, session_key in key_mapping.items():
+            if preset_criteria.get(criteria_key):
+                st.session_state[session_key] = True
+        
+        # Also set numeric values if present
+        if "rsi_min" in preset_criteria:
+            st.session_state["rsi_slider"] = (preset_criteria.get("rsi_min", 40), preset_criteria.get("rsi_max", 60))
+        if "near_52w_high_pct" in preset_criteria:
+            st.session_state["high_pct"] = preset_criteria.get("near_52w_high_pct", 5)
+        if "near_52w_low_pct" in preset_criteria:
+            st.session_state["low_pct"] = preset_criteria.get("near_52w_low_pct", 10)
+        if "volume_ratio_min" in preset_criteria:
+            st.session_state["vol_ratio"] = preset_criteria.get("volume_ratio_min", 1.5)
+        if "consecutive_up_min" in preset_criteria:
+            st.session_state["up_days"] = preset_criteria.get("consecutive_up_min", 3)
+        if "consecutive_down_min" in preset_criteria:
+            st.session_state["down_days"] = preset_criteria.get("consecutive_down_min", 3)
+        
+        st.session_state.last_loaded_preset = selected_preset
+        st.rerun()
+    
+    st.divider()
+    
+    # ==========================================================================
+    # FILTER CRITERIA - Organized in Expandable Sections
+    # ==========================================================================
+    
+    st.markdown("#### 📊 Filter Criteria")
+    
+    # Row 1: RSI, MACD, Bollinger Bands
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("**RSI Conditions**")
-        rsi_oversold = st.checkbox("RSI Oversold (< 30)", key="rsi_os")
-        rsi_overbought = st.checkbox("RSI Overbought (> 70)", key="rsi_ob")
-        rsi_range = st.checkbox("RSI in Range", key="rsi_range")
-        if rsi_range:
-            rsi_min, rsi_max = st.slider("RSI Range", 0, 100, (40, 60), key="rsi_slider")
-        else:
-            rsi_min, rsi_max = 0, 100
+        with st.expander("**RSI Conditions**", expanded=True):
+            rsi_oversold = st.checkbox("RSI Oversold (< 30)", key="rsi_os")
+            rsi_overbought = st.checkbox("RSI Overbought (> 70)", key="rsi_ob")
+            rsi_range = st.checkbox("RSI in Range", key="rsi_range")
+            if rsi_range:
+                rsi_min, rsi_max = st.slider("RSI Range", 0, 100, (40, 60), key="rsi_slider")
+            else:
+                rsi_min, rsi_max = 0, 100
     
     with col2:
-        st.markdown("**MACD Conditions**")
-        macd_bullish = st.checkbox("MACD Bullish (Histogram > 0)", key="macd_bull")
-        macd_bearish = st.checkbox("MACD Bearish (Histogram < 0)", key="macd_bear")
-        
-        st.markdown("**SMA Crossover**")
-        sma_golden = st.checkbox("Golden Cross (SMA20 > SMA50)", key="sma_golden")
-        sma_death = st.checkbox("Death Cross (SMA20 < SMA50)", key="sma_death")
+        with st.expander("**MACD Conditions**", expanded=True):
+            macd_bullish = st.checkbox("MACD Bullish (Histogram > 0)", key="macd_bull")
+            macd_bearish = st.checkbox("MACD Bearish (Histogram < 0)", key="macd_bear")
     
     with col3:
-        st.markdown("**Bollinger Bands**")
-        bb_oversold = st.checkbox("Near Lower Band (< 20%)", key="bb_os")
-        bb_overbought = st.checkbox("Near Upper Band (> 80%)", key="bb_ob")
-        
-        st.markdown("**Price vs SMA**")
-        above_sma20 = st.checkbox("Price > SMA 20", key="above_20")
-        below_sma20 = st.checkbox("Price < SMA 20", key="below_20")
-        above_sma50 = st.checkbox("Price > SMA 50", key="above_50")
-        below_sma50 = st.checkbox("Price < SMA 50", key="below_50")
+        with st.expander("**Bollinger Bands**", expanded=True):
+            bb_oversold = st.checkbox("Near Lower Band (< 20%)", key="bb_os")
+            bb_overbought = st.checkbox("Near Upper Band (> 80%)", key="bb_ob")
+    
+    # Row 2: Moving Averages
+    col4, col5, col6 = st.columns(3)
+    
+    with col4:
+        with st.expander("**SMA Crossovers**", expanded=False):
+            sma_golden = st.checkbox("Golden Cross (SMA20 > SMA50)", key="sma_golden")
+            sma_death = st.checkbox("Death Cross (SMA20 < SMA50)", key="sma_death")
+            sma_alignment = st.checkbox("Bullish Alignment (20>50>200)", key="sma_align")
+    
+    with col5:
+        with st.expander("**Price vs SMA**", expanded=False):
+            above_sma20 = st.checkbox("Price > SMA 20", key="above_20")
+            below_sma20 = st.checkbox("Price < SMA 20", key="below_20")
+            above_sma50 = st.checkbox("Price > SMA 50", key="above_50")
+            below_sma50 = st.checkbox("Price < SMA 50", key="below_50")
+            above_sma200 = st.checkbox("Price > SMA 200", key="above_200")
+            below_sma200 = st.checkbox("Price < SMA 200", key="below_200")
+    
+    with col6:
+        with st.expander("**EMA Crossovers**", expanded=False):
+            ema_bull_cross = st.checkbox("Recent Bullish Cross (5d)", key="ema_bull")
+            ema_bear_cross = st.checkbox("Recent Bearish Cross (5d)", key="ema_bear")
+    
+    # Row 3: Volume, 52-Week, Volatility
+    col7, col8, col9 = st.columns(3)
+    
+    with col7:
+        with st.expander("**Volume Filters**", expanded=False):
+            volume_spike = st.checkbox("Volume Spike (> 1.5x avg)", key="vol_spike")
+            volume_above = st.checkbox("Volume Above Average", key="vol_above")
+            if volume_above:
+                vol_ratio_min = st.slider("Min Volume Ratio", 1.0, 5.0, 1.5, 0.1, key="vol_ratio")
+            else:
+                vol_ratio_min = 1.5
+            volume_below = st.checkbox("Volume Below Average", key="vol_below")
+    
+    with col8:
+        with st.expander("**52-Week Position**", expanded=False):
+            near_52w_high = st.checkbox("Near 52-Week High", key="near_high")
+            if near_52w_high:
+                near_high_pct = st.slider("Within % of High", 1, 15, 5, key="high_pct")
+            else:
+                near_high_pct = 5
+            near_52w_low = st.checkbox("Near 52-Week Low", key="near_low")
+            if near_52w_low:
+                near_low_pct = st.slider("Within % of Low", 1, 30, 10, key="low_pct")
+            else:
+                near_low_pct = 10
+    
+    with col9:
+        with st.expander("**Volatility (ATR)**", expanded=False):
+            high_vol = st.checkbox("High Volatility (ATR > 70th pctl)", key="high_vol")
+            low_vol = st.checkbox("Low Volatility (ATR < 30th pctl)", key="low_vol")
+    
+    # Row 4: Momentum / Streak
+    col10, col11, col12 = st.columns(3)
+    
+    with col10:
+        with st.expander("**Consecutive Days**", expanded=False):
+            consec_up = st.checkbox("Consecutive Up Days", key="consec_up")
+            if consec_up:
+                consec_up_min = st.slider("Min Up Days", 2, 10, 3, key="up_days")
+            else:
+                consec_up_min = 3
+            consec_down = st.checkbox("Consecutive Down Days", key="consec_down")
+            if consec_down:
+                consec_down_min = st.slider("Min Down Days", 2, 10, 3, key="down_days")
+            else:
+                consec_down_min = 3
+    
+    with col11:
+        with st.expander("**1-Day Return**", expanded=False):
+            ret_1d_pos = st.checkbox("Positive (Up Day)", key="ret_pos")
+            ret_1d_neg = st.checkbox("Negative (Down Day)", key="ret_neg")
+    
+    with col12:
+        with st.expander("**ML Prediction**", expanded=False):
+            enable_ml = st.checkbox("Enable ML Scoring", key="enable_ml", 
+                                    help="Run ML prediction on matches (slower)")
+            if enable_ml:
+                ml_horizon = st.slider("Prediction Horizon (days)", 1, 20, 5, key="ml_horizon")
+            else:
+                ml_horizon = 5
     
     st.divider()
     
-    # Market cap selection
-    st.markdown("#### Select Market Cap & Categories")
+    # ==========================================================================
+    # MARKET CAP & CATEGORY SELECTION
+    # ==========================================================================
+    
+    st.markdown("#### 🏢 Stock Universe")
     
     cap_col1, cap_col2, cap_col3, cap_col4 = st.columns(4)
     
@@ -543,43 +1423,24 @@ def render_screener_tab():
     
     st.divider()
     
-    # Build stock list based on selections
+    # Build stock list
     stocks_to_scan = []
     category_selections = {
-        # Large Cap
-        "Large Cap Tech": lc_tech,
-        "Large Cap Finance": lc_finance,
-        "Large Cap Healthcare": lc_healthcare,
-        "Large Cap Consumer": lc_consumer,
-        "Large Cap Energy": lc_energy,
-        "Large Cap Industrial": lc_industrial,
-        "Large Cap Communication": lc_comm,
-        "Large Cap Real Estate": lc_real_estate,
-        # Mid Cap
-        "Mid Cap Tech": mc_tech,
-        "Mid Cap Finance": mc_finance,
-        "Mid Cap Healthcare": mc_healthcare,
-        "Mid Cap Consumer": mc_consumer,
-        "Mid Cap Energy": mc_energy,
-        "Mid Cap Industrial": mc_industrial,
-        # Small Cap
-        "Small Cap Tech": sc_tech,
-        "Small Cap Finance": sc_finance,
-        "Small Cap Healthcare": sc_healthcare,
-        "Small Cap Consumer": sc_consumer,
-        "Small Cap Energy": sc_energy,
-        "Small Cap Industrial": sc_industrial,
-        # Micro Cap
+        "Large Cap Tech": lc_tech, "Large Cap Finance": lc_finance,
+        "Large Cap Healthcare": lc_healthcare, "Large Cap Consumer": lc_consumer,
+        "Large Cap Energy": lc_energy, "Large Cap Industrial": lc_industrial,
+        "Large Cap Communication": lc_comm, "Large Cap Real Estate": lc_real_estate,
+        "Mid Cap Tech": mc_tech, "Mid Cap Finance": mc_finance,
+        "Mid Cap Healthcare": mc_healthcare, "Mid Cap Consumer": mc_consumer,
+        "Mid Cap Energy": mc_energy, "Mid Cap Industrial": mc_industrial,
+        "Small Cap Tech": sc_tech, "Small Cap Finance": sc_finance,
+        "Small Cap Healthcare": sc_healthcare, "Small Cap Consumer": sc_consumer,
+        "Small Cap Energy": sc_energy, "Small Cap Industrial": sc_industrial,
         "Micro Cap Speculative": micro_spec,
-        # ETFs
-        "ETFs - Broad Market": etf_broad,
-        "ETFs - Sector": etf_sector,
-        "ETFs - Growth/Value": etf_growth,
-        "ETFs - International": etf_intl,
-        "ETFs - Fixed Income": etf_fixed,
-        "ETFs - Thematic": etf_thematic,
-        "ETFs - Commodities": etf_commodity,
-        "ETFs - Leveraged/Inverse": etf_leveraged,
+        "ETFs - Broad Market": etf_broad, "ETFs - Sector": etf_sector,
+        "ETFs - Growth/Value": etf_growth, "ETFs - International": etf_intl,
+        "ETFs - Fixed Income": etf_fixed, "ETFs - Thematic": etf_thematic,
+        "ETFs - Commodities": etf_commodity, "ETFs - Leveraged/Inverse": etf_leveraged,
     }
     
     for category, selected in category_selections.items():
@@ -588,115 +1449,297 @@ def render_screener_tab():
     
     stocks_to_scan = list(set(stocks_to_scan))
     
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.caption(f"📊 Will scan **{len(stocks_to_scan)}** stocks across selected categories")
-    with col_b:
-        max_stocks = st.number_input("Max Results", min_value=5, max_value=100, value=30)
+    # ==========================================================================
+    # SCAN CONTROLS
+    # ==========================================================================
     
-    # Scan button
-    scan_btn = st.button("🚀 Scan Market", type="primary", use_container_width=True)
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
+    
+    with ctrl_col1:
+        st.caption(f"📊 Will scan **{len(stocks_to_scan)}** stocks across selected categories")
+    
+    with ctrl_col2:
+        max_results = st.number_input("Max Results", min_value=5, max_value=100, value=30)
+    
+    with ctrl_col3:
+        lookback_days = st.number_input("Lookback (days)", min_value=100, max_value=500, value=400,
+                                        help="Days of data to fetch (400 recommended for 52-week metrics)")
+    
+    # Build criteria dictionary
+        criteria = {
+        "rsi_oversold": rsi_oversold, "rsi_overbought": rsi_overbought,
+        "rsi_range": rsi_range, "rsi_min": rsi_min, "rsi_max": rsi_max,
+        "macd_bullish": macd_bullish, "macd_bearish": macd_bearish,
+        "sma_golden_cross": sma_golden, "sma_death_cross": sma_death,
+        "sma_bullish_alignment": sma_alignment,
+        "bb_oversold": bb_oversold, "bb_overbought": bb_overbought,
+        "above_sma_20": above_sma20, "below_sma_20": below_sma20,
+        "above_sma_50": above_sma50, "below_sma_50": below_sma50,
+        "above_sma_200": above_sma200, "below_sma_200": below_sma200,
+        "ema_bullish_cross": ema_bull_cross, "ema_bearish_cross": ema_bear_cross,
+        "volume_spike": volume_spike, "volume_above_avg": volume_above,
+        "volume_ratio_min": vol_ratio_min, "volume_below_avg": volume_below,
+        "near_52w_high": near_52w_high, "near_52w_high_pct": near_high_pct,
+        "near_52w_low": near_52w_low, "near_52w_low_pct": near_low_pct,
+        "high_volatility": high_vol, "low_volatility": low_vol,
+        "consecutive_up": consec_up, "consecutive_up_min": consec_up_min,
+        "consecutive_down": consec_down, "consecutive_down_min": consec_down_min,
+        "return_1d_positive": ret_1d_pos, "return_1d_negative": ret_1d_neg,
+    }
+    
+    # Get active criteria for display
+    active_criteria = get_active_criteria_list(criteria)
+    
+    if active_criteria:
+        st.info(f"**Active Filters:** {' • '.join(active_criteria)}")
+    
+    # Action buttons row - symmetrical layout
+    btn_col1, btn_col2 = st.columns(2)
+    
+    with btn_col1:
+        scan_btn = st.button("🚀 Scan Market", type="primary", use_container_width=True)
+    
+    with btn_col2:
+        # Save preset controls in a sub-row
+        save_sub1, save_sub2 = st.columns([2, 1])
+        with save_sub1:
+            save_preset_name = st.text_input("Preset Name", placeholder="My Scan", key="save_name", label_visibility="collapsed")
+        with save_sub2:
+            if st.button("💾 Save", use_container_width=True, disabled=not save_preset_name):
+                if save_preset(save_preset_name, criteria, f"Custom scan with {len(active_criteria)} filters"):
+                    st.success(f"Saved: {save_preset_name}")
+                else:
+                    st.error("Failed to save")
+    
+    # ==========================================================================
+    # RUN SCAN
+    # ==========================================================================
     
     if scan_btn:
-        # Build criteria dict
-        criteria = {
-            "rsi_oversold": rsi_oversold,
-            "rsi_overbought": rsi_overbought,
-            "rsi_range": rsi_range,
-            "rsi_min": rsi_min,
-            "rsi_max": rsi_max,
-            "macd_bullish": macd_bullish,
-            "macd_bearish": macd_bearish,
-            "sma_golden_cross": sma_golden,
-            "sma_death_cross": sma_death,
-            "bb_oversold": bb_oversold,
-            "bb_overbought": bb_overbought,
-            "above_sma_20": above_sma20,
-            "below_sma_20": below_sma20,
-            "above_sma_50": above_sma50,
-            "below_sma_50": below_sma50,
-        }
-        
-        # Check if any criteria selected
-        if not any([rsi_oversold, rsi_overbought, rsi_range, macd_bullish, macd_bearish,
-                    sma_golden, sma_death, bb_oversold, bb_overbought,
-                    above_sma20, below_sma20, above_sma50, below_sma50]):
-            st.warning("⚠️ Please select at least one criterion")
+        if not active_criteria:
+            st.warning("⚠️ Please select at least one filter criterion")
             return
         
-        start_str = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        if not stocks_to_scan:
+            st.warning("⚠️ Please select at least one stock category")
+            return
+        
+        # Date range
+        start_str = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Scan stocks
-        progress = st.progress(0)
-        status = st.empty()
+        # Progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        results_placeholder = st.empty()
         
-        matches = []
+        def update_progress(scanned, total, symbol, matches_count):
+            progress_bar.progress(scanned / total)
+            status_text.text(f"Scanning {symbol}... ({scanned}/{total}) | Found: {matches_count}")
         
-        for i, symbol in enumerate(stocks_to_scan):
-            status.text(f"Scanning {symbol}... ({i+1}/{len(stocks_to_scan)})")
-            progress.progress((i + 1) / len(stocks_to_scan))
-            
-            indicators = scan_stock(symbol, start_str, end_str)
-            
-            if check_criteria(indicators, criteria):
-                matches.append(indicators)
-                if len(matches) >= max_stocks:
-                    break
+        # Run parallel scan
+        with st.spinner("Initializing scan..."):
+            matches, errors, scanned = parallel_scan_stocks(
+                stocks_to_scan, start_str, end_str, criteria,
+                max_results=max_results, progress_callback=update_progress
+            )
         
-        progress.empty()
-        status.empty()
+        progress_bar.empty()
+        status_text.empty()
         
-        # Display results
+        # Store results in session state
+        st.session_state.screener_results = matches
+        
+        # Show errors summary if any
+        if errors:
+            with st.expander(f"⚠️ {len(errors)} symbols had errors", expanded=False):
+                for sym, err in list(errors.items())[:10]:
+                    st.caption(f"{sym}: {err}")
+                if len(errors) > 10:
+                    st.caption(f"... and {len(errors) - 10} more")
+    
+    # ==========================================================================
+    # DISPLAY RESULTS
+    # ==========================================================================
+    
+    if st.session_state.screener_results:
+        matches = st.session_state.screener_results
+        
         st.divider()
         st.markdown(f"### ✅ Found {len(matches)} Matching Stocks")
         
-        if matches:
-            # Create results dataframe
-            results_df = pd.DataFrame(matches)
+        if len(matches) == 0:
+            st.info("No stocks matched your criteria. Try adjusting the filters.")
+        else:
+            # Prepare DataFrame for display with safe value handling
+            display_data = []
+            for m in matches:
+                close_val = m.get("close")
+                ret_val = m.get("return_1d")
+                rsi_val = m.get("rsi_14")
+                macd_val = m.get("macd_hist")
+                bb_val = m.get("bb_position")
+                vol_val = m.get("volume_ratio")
+                pos_val = m.get("position_52w")
+                
+                row = {
+                    "Symbol": m.get("symbol", ""),
+                    "Price": f"${close_val:.2f}" if close_val else "N/A",
+                    "1D %": f"{ret_val*100:+.2f}%" if ret_val else "N/A",
+                    "RSI": f"{rsi_val:.1f}" if rsi_val else "N/A",
+                    "MACD": f"{macd_val:.4f}" if macd_val else "N/A",
+                    "BB Pos": f"{bb_val:.2f}" if bb_val is not None else "N/A",
+                    "Vol Ratio": f"{vol_val:.2f}x" if vol_val else "N/A",
+                    "52W Pos": f"{pos_val*100:.1f}%" if pos_val else "N/A",
+                    "Signal": "🟢 Bullish" if macd_val and macd_val > 0 else "🔴 Bearish",
+                }
+                display_data.append(row)
             
-            # Display as cards
-            for idx, row in enumerate(matches):
-                symbol = row.get("symbol", "N/A")
-                close = row.get("close", 0)
-                rsi = row.get("rsi_14", 0)
-                macd = row.get("macd_hist", 0)
-                bb_pos = row.get("bb_position", 0.5)
-                sma_cross = row.get("sma_20_above_50", None)
+            results_df = pd.DataFrame(display_data)
+            
+            # Display results table (full width, no CSV export)
+            st.dataframe(
+                results_df,
+                use_container_width=True,
+                height=min(400, len(results_df) * 38 + 50),
+                hide_index=True
+            )
+            
+            st.divider()
+            
+            # Stock Details Section
+            st.markdown("#### 📋 Stock Details")
+            
+            symbol_list = [m.get("symbol") for m in matches]
+            selected_symbol = st.selectbox(
+                "Select a stock for detailed view:", 
+                symbol_list, 
+                key="detail_select"
+            )
+            
+            if selected_symbol:
+                selected_data = next((m for m in matches if m.get("symbol") == selected_symbol), None)
                 
-                # Determine if bullish or bearish overall
-                bullish_signals = sum([
-                    rsi < 30 if rsi else False,
-                    macd > 0 if macd else False,
-                    sma_cross == True,
-                    bb_pos < 0.2 if bb_pos else False,
-                ])
-                is_bullish = bullish_signals >= 2
-                
-                card_class = "match-bullish" if is_bullish else "match-bearish"
-                signal_emoji = "🟢" if is_bullish else "🔴"
-                
-                with st.container():
-                    cols = st.columns([1, 2, 2, 2, 2, 1])
-                    with cols[0]:
-                        st.markdown(f"### {signal_emoji} {symbol}")
-                    with cols[1]:
-                        st.metric("Price", f"${close:.2f}" if close else "N/A")
-                    with cols[2]:
-                        rsi_status = "Oversold" if rsi and rsi < 30 else "Overbought" if rsi and rsi > 70 else "Neutral"
-                        st.metric("RSI", f"{rsi:.1f}" if rsi else "N/A", delta=rsi_status)
-                    with cols[3]:
+                if selected_data:
+                    # Row 1: Key Metrics
+                    st.markdown(f"##### 📊 {selected_symbol} - Key Metrics")
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    
+                    close = selected_data.get("close")
+                    ret_1d = selected_data.get("return_1d")
+                    rsi = selected_data.get("rsi_14")
+                    macd = selected_data.get("macd_hist")
+                    vol_ratio = selected_data.get("volume_ratio")
+                    
+                    with c1:
+                        delta_str = f"{ret_1d*100:+.2f}%" if ret_1d else None
+                        st.metric("Price", f"${close:.2f}" if close else "N/A", delta=delta_str)
+                    
+                    with c2:
+                        rsi_status = "Oversold" if rsi and rsi < 30 else ("Overbought" if rsi and rsi > 70 else "Neutral")
+                        st.metric("RSI (14)", f"{rsi:.1f}" if rsi else "N/A", delta=rsi_status)
+                    
+                    with c3:
                         macd_status = "Bullish" if macd and macd > 0 else "Bearish"
-                        st.metric("MACD Hist", f"{macd:.3f}" if macd else "N/A", delta=macd_status)
-                    with cols[4]:
-                        cross_str = "Golden" if sma_cross else "Death" if sma_cross == False else "N/A"
-                        st.metric("SMA Cross", cross_str)
-                    with cols[5]:
-                        st.metric("BB Pos", f"{bb_pos:.2f}" if bb_pos is not None else "N/A")
+                        st.metric("MACD Hist", f"{macd:.4f}" if macd else "N/A", delta=macd_status)
+                    
+                    with c4:
+                        st.metric("Volume Ratio", f"{vol_ratio:.2f}x" if vol_ratio else "N/A")
+                    
+                    with c5:
+                        pos_52w = selected_data.get("position_52w")
+                        st.metric("52W Position", f"{pos_52w*100:.1f}%" if pos_52w else "N/A")
+                    
+                    # Row 2: Moving Averages
+                    c6, c7, c8, c9, c10 = st.columns(5)
+                    
+                    sma20 = selected_data.get("sma_20")
+                    sma50 = selected_data.get("sma_50")
+                    sma200 = selected_data.get("sma_200")
+                    bb_pos = selected_data.get("bb_position")
+                    atr_pctl = selected_data.get("atr_percentile")
+                    
+                    with c6:
+                        st.metric("SMA 20", f"${sma20:.2f}" if sma20 else "N/A")
+                    
+                    with c7:
+                        st.metric("SMA 50", f"${sma50:.2f}" if sma50 else "N/A")
+                    
+                    with c8:
+                        st.metric("SMA 200", f"${sma200:.2f}" if sma200 else "N/A")
+                    
+                    with c9:
+                        st.metric("BB Position", f"{bb_pos:.2f}" if bb_pos is not None else "N/A")
+                    
+                    with c10:
+                        st.metric("ATR Percentile", f"{atr_pctl:.0f}%" if atr_pctl else "N/A")
+                    
+                    # Matched criteria badges
+                    matched_criteria = selected_data.get("matched_criteria", [])
+                    if matched_criteria:
+                        st.success(f"✅ **Matched Filters:** {' • '.join(matched_criteria)}")
                     
                     st.divider()
-        else:
-            st.info("No stocks matched your criteria. Try adjusting the filters.")
+                    
+                    # Charts Section - Use same charts as Analyzer
+                    st.markdown(f"##### 📉 {selected_symbol} - Charts")
+                    
+                    with st.spinner(f"Loading charts for {selected_symbol}..."):
+                        try:
+                            # Fetch data for charts
+                            chart_start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+                            chart_end = datetime.now().strftime("%Y-%m-%d")
+                            chart_df = fetch_stock_data(selected_symbol, chart_start, chart_end, "1Day", use_cache=True)
+                            
+                            if chart_df is not None and len(chart_df) >= 50:
+                                # Compute indicators for charts
+                                chart_df = compute_all_indicators(chart_df)
+                                
+                                # Price chart (same as Analyzer)
+                                price_fig = create_price_chart(chart_df, selected_symbol)
+                                st.plotly_chart(price_fig, use_container_width=True)
+                                
+                                # RSI chart (same as Analyzer)
+                                chart_col1, chart_col2 = st.columns(2)
+                                with chart_col1:
+                                    rsi_fig = create_rsi_chart(chart_df, selected_symbol)
+                                    st.plotly_chart(rsi_fig, use_container_width=True)
+                                
+                                # ML Prediction section (if enabled)
+                                if enable_ml:
+                                    with chart_col2:
+                                        try:
+                                            ml_features = prepare_features(chart_df.copy(), horizon=ml_horizon, task="classification")
+                                            feature_cols = get_feature_columns(ml_features)
+                                            ml_results = train_and_evaluate(selected_symbol, ml_features, feature_cols, task="classification")
+                                            
+                                            if ml_results:
+                                                pred, prob = predict_latest(ml_features, feature_cols, ml_results.model, "classification")
+                                                direction = "📈 UP" if pred == 1 else "📉 DOWN"
+                                                accuracy = ml_results.metrics.get("accuracy", 0)
+                                                
+                                                # Predictions chart
+                                                pred_fig = create_predictions_chart(
+                                                    chart_df, selected_symbol, 
+                                                    ml_results.predictions, ml_results.probabilities, 
+                                                    ml_results.test_indices, 0.55
+                                                )
+                                                st.plotly_chart(pred_fig, use_container_width=True)
+                                                
+                                                # ML metrics
+                                                ml_c1, ml_c2, ml_c3 = st.columns(3)
+                                                with ml_c1:
+                                                    st.metric(f"{ml_horizon}-Day Prediction", direction)
+                                                with ml_c2:
+                                                    st.metric("Probability", f"{prob:.1%}" if prob else "N/A")
+                                                with ml_c3:
+                                                    st.metric("Model Accuracy", f"{accuracy:.1%}")
+                                        except Exception as e:
+                                            st.warning(f"ML prediction unavailable: {e}")
+                            else:
+                                st.warning(f"Insufficient data to display charts for {selected_symbol}")
+                        except Exception as e:
+                            st.error(f"Error loading charts: {e}")
 
 
 def main():
