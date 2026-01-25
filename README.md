@@ -22,17 +22,38 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Set Up Alpaca Credentials
+### 2. Set Up Alpaca API Credentials
 
-Create a `.env` file in the project root:
+> ⚠️ **You need 2 API credentials**: an API Key AND an API Secret
+
+#### How to Get Your API Keys (Free):
+
+1. **Sign up** at [alpaca.markets](https://alpaca.markets) (free account)
+2. **Log in** to [app.alpaca.markets](https://app.alpaca.markets)
+3. Click **"API Keys"** in the left sidebar
+4. Click **"Generate New Key"**
+5. **Copy both** the Key AND Secret immediately (secret is only shown once!)
+
+#### Create Your .env File:
+
+```bash
+# Create .env file in project root
+touch .env
+```
+
+Add your credentials:
 
 ```env
 ALPACA_API_KEY=your_api_key_here
 ALPACA_API_SECRET=your_api_secret_here
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
 ```
 
-Get free API keys at [Alpaca Markets](https://alpaca.markets/) (paper trading account works).
+| Credential | What it looks like |
+|------------|-------------------|
+| API Key | Starts with `PK`, ~20 characters |
+| API Secret | ~40 characters, mixed case |
+
+> 🔒 **Security**: Never share your API secret or commit `.env` to git!
 
 ### 3. Run the Web App
 

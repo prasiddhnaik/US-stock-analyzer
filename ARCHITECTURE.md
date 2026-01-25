@@ -586,17 +586,40 @@ graph TD
 
 ## 🔐 Environment Configuration
 
+### ⚠️ Required: 2 API Credentials
+
+You need **both** an API Key AND an API Secret from Alpaca:
+
+| Credential | Format | Example |
+|------------|--------|---------|
+| **API Key** | `PK` + 20 chars | `PKABCD1234EFGH5678XY` |
+| **API Secret** | 40 chars | `aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890abcd` |
+
+### How to Get Your API Keys
+
+1. **Create Account**: Go to [alpaca.markets](https://alpaca.markets) and sign up (free)
+2. **Access Dashboard**: Log in to [app.alpaca.markets](https://app.alpaca.markets)
+3. **Generate Keys**: Click **"API Keys"** in sidebar → **"Generate New Key"**
+4. **Copy Both**: Save both the Key AND Secret (secret is only shown once!)
+
+> 🔒 **Security**: Never share your API secret. If compromised, regenerate immediately.
+
+### .env File Setup
+
+Create a `.env` file in the project root:
+
 ```bash
-# .env file
+# .env file (DO NOT commit to git!)
 ALPACA_API_KEY=your_api_key_here
 ALPACA_API_SECRET=your_api_secret_here
 ```
 
 ### API Details
-- **Provider**: Alpaca Markets
+- **Provider**: Alpaca Markets (free tier available)
 - **Feed**: IEX (free tier compatible)
 - **Rate Limits**: Built-in protection with semaphore + jitter
 - **Timeframes**: 1Min, 5Min, 15Min, 30Min, 1Hour, 1Day, 1Week, 1Month
+- **Paper Trading**: Use paper account keys for testing (no real money)
 
 ---
 
