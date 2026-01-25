@@ -184,26 +184,79 @@ def validate_criteria(criteria: dict) -> dict:
 
 
 # =============================================================================
-# Rate-Limited Data Fetching
+# Session-Based Caching (Clears on Tab Close)
 # =============================================================================
 
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_ohlcv_cached(symbol: str, start: str, end: str) -> pd.DataFrame:
-    """Cached OHLCV data fetch - separates I/O from compute."""
-    return fetch_stock_data(symbol, start, end, "1Day", use_cache=True)
+def init_session_cache():
+    """Initialize the session-state data cache."""
+    if "data_cache" not in st.session_state:
+        st.session_state.data_cache = {}
 
+
+def fetch_with_session_cache(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Fetch OHLCV data with browser session caching.
+    
+    - Data persists while the tab is open
+    - Clears automatically when the tab/browser is closed
+    - No files written to disk
+    """
+    init_session_cache()
+    
+    # Create cache key
+    cache_key = f"{symbol}_{start}_{end}"
+    
+    # Return cached data if available
+    if cache_key in st.session_state.data_cache:
+        return st.session_state.data_cache[cache_key]
+    
+    # Fetch from API (no file caching)
+    df = fetch_stock_data(symbol, start, end, "1Day", use_cache=False)
+    
+    # Store in session state (only if valid)
+    if df is not None and len(df) > 0:
+        st.session_state.data_cache[cache_key] = df
+    
+    return df
+
+
+def get_cache_stats():
+    """Get current session cache statistics."""
+    init_session_cache()
+    cache = st.session_state.data_cache
+    
+    total_items = len(cache)
+    symbols = set(k.split("_")[0] for k in cache.keys())
+    
+    return {
+        "items": total_items,
+        "symbols": len(symbols),
+        "symbol_list": sorted(symbols)
+    }
+
+
+def clear_session_cache():
+    """Clear all cached data from session state."""
+    if "data_cache" in st.session_state:
+        st.session_state.data_cache = {}
+
+
+# =============================================================================
+# Rate-Limited Data Fetching
+# =============================================================================
 
 def rate_limited_fetch(symbol: str, start: str, end: str) -> tuple:
     """
     Rate-limited fetch with jitter to prevent API throttling.
     Returns (symbol, df, error) tuple.
+    Uses session-based caching (clears on tab close).
     """
     with RATE_LIMIT_SEMAPHORE:
         # Add jitter to prevent burst requests
         time.sleep(random.uniform(MIN_FETCH_DELAY, MIN_FETCH_DELAY * 2))
         
         try:
-            df = fetch_ohlcv_cached(symbol, start, end)
+            df = fetch_with_session_cache(symbol, start, end)
             if df is None:
                 return (symbol, None, "No data returned")
             if len(df) < MIN_DATA_POINTS:
@@ -1031,11 +1084,10 @@ def get_rsi_status(rsi):
         return "Neutral", "gray"
 
 
-@st.cache_data(ttl=300)
 def fetch_and_analyze(symbol: str, start: str, end: str, horizon: int):
-    """Fetch data and run analysis for a symbol."""
+    """Fetch data and run analysis for a symbol (uses session caching)."""
     try:
-        df = fetch_stock_data(symbol, start, end, "1Day", use_cache=True)
+        df = fetch_with_session_cache(symbol, start, end)
         
         if df is None or len(df) == 0:
             return None, f"No data found for {symbol}"
@@ -1362,7 +1414,7 @@ def render_screener_tab():
         with st.expander("**Bollinger Bands**", expanded=True):
             bb_oversold = st.checkbox("Near Lower Band (< 20%)", key="bb_os")
             bb_overbought = st.checkbox("Near Upper Band (> 80%)", key="bb_ob")
-    
+        
     # Row 2: Moving Averages
     col4, col5, col6 = st.columns(3)
     
@@ -1768,10 +1820,10 @@ def render_screener_tab():
                     
                     with st.spinner(f"Loading charts for {selected_symbol}..."):
                         try:
-                            # Fetch data for charts
+                            # Fetch data for charts (uses session caching)
                             chart_start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
                             chart_end = datetime.now().strftime("%Y-%m-%d")
-                            chart_df = fetch_stock_data(selected_symbol, chart_start, chart_end, "1Day", use_cache=True)
+                            chart_df = fetch_with_session_cache(selected_symbol, chart_start, chart_end)
                             
                             if chart_df is not None and len(chart_df) >= 50:
                                 # Compute indicators for charts
