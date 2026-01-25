@@ -935,6 +935,84 @@ STOCK_UNIVERSE = {
     ],
 }
 
+# Company name mapping for better error/display messages
+COMPANY_NAMES = {
+    # Large Cap Tech
+    "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Alphabet", "AMZN": "Amazon", "NVDA": "NVIDIA",
+    "META": "Meta Platforms", "TSLA": "Tesla", "AVGO": "Broadcom", "ORCL": "Oracle", "ADBE": "Adobe",
+    "CRM": "Salesforce", "CSCO": "Cisco", "ACN": "Accenture", "IBM": "IBM", "INTC": "Intel",
+    "AMD": "AMD", "QCOM": "Qualcomm", "TXN": "Texas Instruments", "NOW": "ServiceNow", "INTU": "Intuit",
+    "AMAT": "Applied Materials", "MU": "Micron", "LRCX": "Lam Research", "ADI": "Analog Devices",
+    "KLAC": "KLA Corp", "SNPS": "Synopsys", "CDNS": "Cadence Design", "MRVL": "Marvell", "NXPI": "NXP Semi",
+    "FTNT": "Fortinet", "PLTR": "Palantir", "SNOW": "Snowflake", "NET": "Cloudflare", "DDOG": "Datadog",
+    "ZS": "Zscaler", "CRWD": "CrowdStrike", "OKTA": "Okta", "MDB": "MongoDB", "TEAM": "Atlassian",
+    "HUBS": "HubSpot", "VEEV": "Veeva Systems", "PAYC": "Paycom", "BILL": "Bill.com", "PCTY": "Paylocity",
+    "DOCU": "DocuSign", "ZEN": "Zendesk (Delisted)", "ESTC": "Elastic", "GTLB": "GitLab", "PATH": "UiPath",
+    "S": "SentinelOne", "CFLT": "Confluent", "MNDY": "Monday.com", "FROG": "JFrog", "SUMO": "Sumo Logic (Delisted)",
+    "NEWR": "New Relic", "PD": "PagerDuty", "EVBG": "Everbridge (Delisted)", "TENB": "Tenable", "VRNS": "Varonis",
+    "RPD": "Rapid7", "PRFT": "Perficient (Delisted)",
+    
+    # Large Cap Finance
+    "JPM": "JPMorgan Chase", "BAC": "Bank of America", "WFC": "Wells Fargo", "GS": "Goldman Sachs",
+    "MS": "Morgan Stanley", "C": "Citigroup", "BLK": "BlackRock", "SCHW": "Charles Schwab", "AXP": "American Express",
+    "SPGI": "S&P Global", "CB": "Chubb", "MMC": "Marsh McLennan", "PGR": "Progressive", "AON": "Aon",
+    "MET": "MetLife", "AIG": "AIG", "TRV": "Travelers", "ALL": "Allstate", "PRU": "Prudential",
+    "AFL": "Aflac", "ICE": "ICE", "CME": "CME Group", "MCO": "Moody's", "MSCI": "MSCI",
+    "FIS": "Fidelity National", "COF": "Capital One", "USB": "US Bancorp", "PNC": "PNC Financial",
+    "TFC": "Truist", "BK": "Bank of NY Mellon", "SIVB": "SVB Financial (Collapsed)", "ZION": "Zions Bancorp",
+    "CFG": "Citizens Financial", "KEY": "KeyCorp", "HBAN": "Huntington Bancshares", "RF": "Regions Financial",
+    "FITB": "Fifth Third", "MTB": "M&T Bank", "CMA": "Comerica", "PBCT": "People's United (Acquired)",
+    "FRC": "First Republic (Collapsed)", "WAL": "Western Alliance", "EWBC": "East West Bancorp",
+    
+    # Large Cap Healthcare
+    "UNH": "UnitedHealth", "JNJ": "Johnson & Johnson", "LLY": "Eli Lilly", "PFE": "Pfizer",
+    "ABBV": "AbbVie", "MRK": "Merck", "TMO": "Thermo Fisher", "ABT": "Abbott Labs", "DHR": "Danaher",
+    "BMY": "Bristol-Myers", "AMGN": "Amgen", "GILD": "Gilead", "CVS": "CVS Health", "ELV": "Elevance",
+    "CI": "Cigna", "ISRG": "Intuitive Surgical", "VRTX": "Vertex Pharma", "REGN": "Regeneron",
+    "MDT": "Medtronic", "SYK": "Stryker", "BSX": "Boston Scientific", "ZTS": "Zoetis", "BDX": "Becton Dickinson",
+    "HUM": "Humana", "EW": "Edwards Lifesciences", "IDXX": "IDEXX Labs", "IQV": "IQVIA", "DXCM": "DexCom",
+    "A": "Agilent", "BIIB": "Biogen", "ALGN": "Align Technology", "SGEN": "Seagen (Acquired)",
+    
+    # Large Cap Consumer
+    "WMT": "Walmart", "PG": "Procter & Gamble", "KO": "Coca-Cola", "PEP": "PepsiCo", "COST": "Costco",
+    "HD": "Home Depot", "MCD": "McDonald's", "NKE": "Nike", "SBUX": "Starbucks", "TGT": "Target",
+    "LOW": "Lowe's", "TJX": "TJX Companies", "BKNG": "Booking Holdings", "MAR": "Marriott",
+    "ORLY": "O'Reilly Auto", "AZO": "AutoZone", "ROST": "Ross Stores", "DG": "Dollar General",
+    "DLTR": "Dollar Tree", "YUM": "Yum Brands", "CMG": "Chipotle", "DHI": "D.R. Horton",
+    "LEN": "Lennar", "NVR": "NVR Inc", "PHM": "PulteGroup", "EL": "Estée Lauder", "CL": "Colgate",
+    "KMB": "Kimberly-Clark", "GIS": "General Mills", "K": "Kellanova",
+    
+    # Large Cap Energy
+    "XOM": "Exxon Mobil", "CVX": "Chevron", "COP": "ConocoPhillips", "SLB": "Schlumberger",
+    "EOG": "EOG Resources", "PXD": "Pioneer Natural", "MPC": "Marathon Petroleum", "VLO": "Valero",
+    "PSX": "Phillips 66", "OXY": "Occidental Petroleum", "WMB": "Williams Companies", "KMI": "Kinder Morgan",
+    "HAL": "Halliburton", "DVN": "Devon Energy", "HES": "Hess Corp", "BKR": "Baker Hughes",
+    "FANG": "Diamondback Energy", "TRGP": "Targa Resources", "OKE": "ONEOK", "LNG": "Cheniere Energy",
+    
+    # Large Cap Industrial
+    "CAT": "Caterpillar", "DE": "Deere", "BA": "Boeing", "HON": "Honeywell", "UPS": "UPS",
+    "RTX": "RTX Corp", "LMT": "Lockheed Martin", "GE": "GE Aerospace", "UNP": "Union Pacific",
+    "ETN": "Eaton", "ITW": "Illinois Tool Works", "EMR": "Emerson", "PH": "Parker Hannifin",
+    "ROK": "Rockwell Automation", "CMI": "Cummins", "PCAR": "PACCAR", "NSC": "Norfolk Southern",
+    "CSX": "CSX Corp", "WM": "Waste Management", "RSG": "Republic Services",
+    
+    # EV & Speculative
+    "LCID": "Lucid Group", "RIVN": "Rivian", "GOEV": "Canoo (Delisted)", "FSR": "Fisker (Bankrupt)",
+    "NKLA": "Nikola", "WKHS": "Workhorse Group", "RIDE": "Lordstown Motors (Bankrupt)",
+    "ARVL": "Arrival (Bankrupt)", "FFIE": "Faraday Future", "MULN": "Mullen Automotive",
+    "VLD": "Velo3D (Delisted)", "JOBY": "Joby Aviation", "GME": "GameStop",
+    
+    # ETFs
+    "SPY": "SPDR S&P 500", "QQQ": "Invesco QQQ", "DIA": "SPDR Dow Jones", "IWM": "iShares Russell 2000",
+    "VTI": "Vanguard Total Stock", "VOO": "Vanguard S&P 500", "XLF": "Financial Select SPDR",
+    "XLE": "Energy Select SPDR", "XLK": "Technology Select SPDR", "XLV": "Health Care Select SPDR",
+    "TQQQ": "ProShares UltraPro QQQ", "SQQQ": "ProShares UltraPro Short QQQ",
+}
+
+def get_company_name(symbol: str) -> str:
+    """Get company name for a symbol, returns symbol if not found."""
+    return COMPANY_NAMES.get(symbol, symbol)
+
 
 def format_number(value, prefix="", suffix="", decimals=2):
     if value is None:
@@ -1553,10 +1631,12 @@ def render_screener_tab():
         # Show errors summary if any
         if errors:
             with st.expander(f"⚠️ {len(errors)} symbols had errors", expanded=False):
-                for sym, err in list(errors.items())[:10]:
-                    st.caption(f"{sym}: {err}")
-                if len(errors) > 10:
-                    st.caption(f"... and {len(errors) - 10} more")
+                for sym, err in list(errors.items())[:15]:
+                    company = get_company_name(sym)
+                    display_name = f"{sym} ({company})" if company != sym else sym
+                    st.caption(f"• {display_name}: {err}")
+                if len(errors) > 15:
+                    st.caption(f"... and {len(errors) - 15} more symbols with similar issues")
     
     # ==========================================================================
     # DISPLAY RESULTS
@@ -1574,6 +1654,7 @@ def render_screener_tab():
             # Prepare DataFrame for display with safe value handling
             display_data = []
             for m in matches:
+                sym = m.get("symbol", "")
                 close_val = m.get("close")
                 ret_val = m.get("return_1d")
                 rsi_val = m.get("rsi_14")
@@ -1583,12 +1664,12 @@ def render_screener_tab():
                 pos_val = m.get("position_52w")
                 
                 row = {
-                    "Symbol": m.get("symbol", ""),
+                    "Symbol": sym,
+                    "Company": get_company_name(sym),
                     "Price": f"${close_val:.2f}" if close_val else "N/A",
                     "1D %": f"{ret_val*100:+.2f}%" if ret_val else "N/A",
                     "RSI": f"{rsi_val:.1f}" if rsi_val else "N/A",
                     "MACD": f"{macd_val:.4f}" if macd_val else "N/A",
-                    "BB Pos": f"{bb_val:.2f}" if bb_val is not None else "N/A",
                     "Vol Ratio": f"{vol_val:.2f}x" if vol_val else "N/A",
                     "52W Pos": f"{pos_val*100:.1f}%" if pos_val else "N/A",
                     "Signal": "🟢 Bullish" if macd_val and macd_val > 0 else "🔴 Bearish",
@@ -1622,7 +1703,8 @@ def render_screener_tab():
                 
                 if selected_data:
                     # Row 1: Key Metrics
-                    st.markdown(f"##### 📊 {selected_symbol} - Key Metrics")
+                    company_name = get_company_name(selected_symbol)
+                    st.markdown(f"##### 📊 {selected_symbol} - {company_name}")
                     c1, c2, c3, c4, c5 = st.columns(5)
                     
                     close = selected_data.get("close")
@@ -1682,7 +1764,7 @@ def render_screener_tab():
                     st.divider()
                     
                     # Charts Section - Use same charts as Analyzer
-                    st.markdown(f"##### 📉 {selected_symbol} - Charts")
+                    st.markdown(f"##### 📉 {selected_symbol} ({company_name}) - Charts")
                     
                     with st.spinner(f"Loading charts for {selected_symbol}..."):
                         try:
