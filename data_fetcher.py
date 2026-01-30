@@ -99,6 +99,63 @@ def get_alpaca_client():
     return StockHistoricalDataClient(api_key, api_secret)
 
 
+def get_trading_client():
+    """
+    Initialize and return Alpaca Trading Client for assets API.
+    Uses separate credentials from the data client.
+    """
+    from alpaca.trading.client import TradingClient
+    
+    trading_key = os.getenv("ALPACA_TRADING_KEY")
+    trading_secret = os.getenv("ALPACA_TRADING_SECRET")
+    
+    if not trading_key or not trading_secret:
+        raise ValueError(
+            "Missing Alpaca Trading API credentials. Please set:\n"
+            "  ALPACA_TRADING_KEY\n"
+            "  ALPACA_TRADING_SECRET\n"
+            "in your environment or .env file."
+        )
+    
+    return TradingClient(trading_key, trading_secret, paper=True)
+
+
+def get_tradeable_symbols() -> set[str]:
+    """
+    Fetch all currently tradeable US equity symbols from Alpaca.
+    
+    Returns:
+        Set of tradeable symbol strings (e.g., {'AAPL', 'MSFT', ...})
+        
+    Raises:
+        ValueError: If trading credentials are missing
+        Exception: If API call fails
+    """
+    from alpaca.trading.requests import GetAssetsRequest
+    from alpaca.trading.enums import AssetClass, AssetStatus
+    
+    try:
+        client = get_trading_client()
+        
+        # Request only active US equities
+        request = GetAssetsRequest(
+            asset_class=AssetClass.US_EQUITY,
+            status=AssetStatus.ACTIVE
+        )
+        
+        assets = client.get_all_assets(request)
+        
+        # Filter for tradeable assets and return symbol set
+        tradeable = {asset.symbol for asset in assets if asset.tradable}
+        
+        print(f"Fetched {len(tradeable)} tradeable symbols from Alpaca")
+        return tradeable
+        
+    except Exception as e:
+        print(f"Error fetching tradeable symbols: {e}")
+        raise
+
+
 def get_cache_path(symbol: str, start: str, end: str, timeframe: str) -> Path:
     """Generate cache file path for given parameters."""
     cache_dir = Path("cache")

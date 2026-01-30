@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 # Load environment variables
 load_dotenv()
 
-from data_fetcher import fetch_stock_data
+from data_fetcher import fetch_stock_data, get_tradeable_symbols
 from indicators import (
     prepare_features, get_feature_columns, get_latest_indicators, 
     compute_all_indicators, compute_screener_indicators, 
@@ -193,7 +193,7 @@ def init_session_cache():
         st.session_state.data_cache = {}
 
 
-def fetch_with_session_cache(symbol: str, start: str, end: str) -> pd.DataFrame:
+def fetch_with_session_cache(symbol: str, start: str, end: str, timeframe: str = "1Day") -> pd.DataFrame:
     """
     Fetch OHLCV data with browser session caching.
     
@@ -203,15 +203,15 @@ def fetch_with_session_cache(symbol: str, start: str, end: str) -> pd.DataFrame:
     """
     init_session_cache()
     
-    # Create cache key
-    cache_key = f"{symbol}_{start}_{end}"
+    # Create cache key (includes timeframe)
+    cache_key = f"{symbol}_{start}_{end}_{timeframe}"
     
     # Return cached data if available
     if cache_key in st.session_state.data_cache:
         return st.session_state.data_cache[cache_key]
     
     # Fetch from API (no file caching)
-    df = fetch_stock_data(symbol, start, end, "1Day", use_cache=False)
+    df = fetch_stock_data(symbol, start, end, timeframe, use_cache=False)
     
     # Store in session state (only if valid)
     if df is not None and len(df) > 0:
@@ -242,10 +242,77 @@ def clear_session_cache():
 
 
 # =============================================================================
+# Live Tradeable Symbols (from Alpaca Assets API)
+# =============================================================================
+
+def get_cached_tradeable_symbols() -> set[str]:
+    """
+    Get tradeable symbols from session cache, fetching from API if needed.
+    
+    Returns:
+        Set of currently tradeable symbol strings
+    """
+    # Check if we have cached symbols
+    if "tradeable_symbols" not in st.session_state:
+        try:
+            st.session_state.tradeable_symbols = get_tradeable_symbols()
+            st.session_state.tradeable_symbols_timestamp = datetime.now()
+            st.session_state.tradeable_symbols_error = None
+        except Exception as e:
+            # If API fails, return empty set and store error
+            st.session_state.tradeable_symbols = set()
+            st.session_state.tradeable_symbols_timestamp = None
+            st.session_state.tradeable_symbols_error = str(e)
+    
+    return st.session_state.tradeable_symbols
+
+
+def refresh_tradeable_symbols():
+    """Force refresh of tradeable symbols cache."""
+    if "tradeable_symbols" in st.session_state:
+        del st.session_state["tradeable_symbols"]
+    if "tradeable_symbols_timestamp" in st.session_state:
+        del st.session_state["tradeable_symbols_timestamp"]
+    if "tradeable_symbols_error" in st.session_state:
+        del st.session_state["tradeable_symbols_error"]
+
+
+def get_tradeable_symbols_status() -> dict:
+    """Get status info about the tradeable symbols cache."""
+    return {
+        "count": len(st.session_state.get("tradeable_symbols", set())),
+        "timestamp": st.session_state.get("tradeable_symbols_timestamp"),
+        "error": st.session_state.get("tradeable_symbols_error"),
+    }
+
+
+def filter_to_tradeable(symbols: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Filter a list of symbols to only include tradeable ones.
+    
+    Args:
+        symbols: List of symbol strings to filter
+        
+    Returns:
+        Tuple of (tradeable_symbols, removed_symbols)
+    """
+    tradeable_set = get_cached_tradeable_symbols()
+    
+    # If we couldn't fetch tradeable symbols, return all (fallback)
+    if not tradeable_set:
+        return symbols, []
+    
+    tradeable = [s for s in symbols if s in tradeable_set]
+    removed = [s for s in symbols if s not in tradeable_set]
+    
+    return tradeable, removed
+
+
+# =============================================================================
 # Rate-Limited Data Fetching
 # =============================================================================
 
-def rate_limited_fetch(symbol: str, start: str, end: str) -> tuple:
+def rate_limited_fetch(symbol: str, start: str, end: str, timeframe: str = "1Day") -> tuple:
     """
     Rate-limited fetch with jitter to prevent API throttling.
     Returns (symbol, df, error) tuple.
@@ -256,7 +323,7 @@ def rate_limited_fetch(symbol: str, start: str, end: str) -> tuple:
         time.sleep(random.uniform(MIN_FETCH_DELAY, MIN_FETCH_DELAY * 2))
         
         try:
-            df = fetch_with_session_cache(symbol, start, end)
+            df = fetch_with_session_cache(symbol, start, end, timeframe)
             if df is None:
                 return (symbol, None, "No data returned")
             if len(df) < MIN_DATA_POINTS:
@@ -557,13 +624,13 @@ def get_active_criteria_list(criteria: dict) -> list:
 # Screener Scanning Functions
 # =============================================================================
 
-def scan_single_stock(symbol: str, start: str, end: str, criteria: dict) -> tuple:
+def scan_single_stock(symbol: str, start: str, end: str, criteria: dict, timeframe: str = "1Day") -> tuple:
     """
     Scan a single stock with rate limiting and error handling.
     Returns (symbol, indicators, matched_criteria, error) tuple.
     """
     # Fetch with rate limiting
-    sym, df, fetch_error = rate_limited_fetch(symbol, start, end)
+    sym, df, fetch_error = rate_limited_fetch(symbol, start, end, timeframe)
     
     if fetch_error:
         return (symbol, None, [], fetch_error)
@@ -593,8 +660,9 @@ def parallel_scan_stocks(
     start: str, 
     end: str, 
     criteria: dict,
-    max_results: int = 50,
-    progress_callback=None
+    max_results: int = 1000,
+    progress_callback=None,
+    timeframe: str = "1Day"
 ) -> tuple:
     """
     Scan multiple stocks in parallel with rate limiting.
@@ -610,7 +678,7 @@ def parallel_scan_stocks(
     with ThreadPoolExecutor(max_workers=10) as executor:
         # Submit all fetch jobs
         futures = {
-            executor.submit(scan_single_stock, sym, start, end, criteria): sym 
+            executor.submit(scan_single_stock, sym, start, end, criteria, timeframe): sym 
             for sym in symbols
         }
         
@@ -859,16 +927,19 @@ STOCK_UNIVERSE = {
         "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "ORCL", "ADBE",
         "CRM", "CSCO", "ACN", "IBM", "INTC", "AMD", "QCOM", "TXN", "NOW", "INTU",
         "AMAT", "MU", "LRCX", "ADI", "KLAC", "SNPS", "CDNS", "MRVL", "NXPI", "FTNT",
+        "ARM", "SMCI", "DELL", "HPE", "ANET", "PANW", "WDAY", "ZM", "SPLK", "UBER",
     ],
     "Large Cap Finance": [
         "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "SPGI",
         "CB", "MMC", "PGR", "AON", "MET", "AIG", "TRV", "ALL", "PRU", "AFL",
         "ICE", "CME", "MCO", "MSCI", "FIS", "COF", "USB", "PNC", "TFC", "BK",
+        "COIN", "HOOD", "SOFI", "AFRM", "UPST", "LC", "SQ", "PYPL", "V", "MA",
     ],
     "Large Cap Healthcare": [
         "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
         "AMGN", "GILD", "CVS", "ELV", "CI", "ISRG", "VRTX", "REGN", "MDT", "SYK",
         "BSX", "ZTS", "BDX", "HUM", "EW", "IDXX", "IQV", "DXCM", "A", "BIIB",
+        "MRNA", "BNTX", "CRSP", "NTLA", "EDIT", "BEAM", "VERV", "BLUE", "EXEL",
     ],
     "Large Cap Consumer": [
         "WMT", "PG", "KO", "PEP", "COST", "HD", "MCD", "NKE", "SBUX", "TGT",
@@ -883,6 +954,7 @@ STOCK_UNIVERSE = {
         "CAT", "DE", "BA", "HON", "UPS", "RTX", "LMT", "GE", "UNP", "ETN",
         "ITW", "EMR", "PH", "ROK", "CMI", "PCAR", "NSC", "CSX", "WM", "RSG",
         "AME", "CTAS", "FAST", "ODFL", "TT", "IR", "GWW", "SWK", "DOV", "ROP",
+        "NOC", "GD", "LHX", "HII", "TDG", "HWM", "TXT", "LDOS", "SAIC", "BAH",
     ],
     "Large Cap Communication": [
         "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR", "EA", "TTWO", "WBD",
@@ -987,11 +1059,49 @@ STOCK_UNIVERSE = {
     ],
     "ETFs - Commodities": [
         "GLD", "SLV", "IAU", "GLDM", "PPLT", "PALL", "USO", "BNO", "UNG", "DBA",
-        "DBC", "PDBC", "GSG", "COMT", "CPER", "JJC", "WEAT", "CORN", "SOYB", "NIB",
+        "DBC", "PDBC", "GSG", "COMT", "CPER", "WEAT", "CORN", "SOYB",
     ],
     "ETFs - Leveraged/Inverse": [
         "TQQQ", "SQQQ", "SPXL", "SPXS", "UPRO", "SPXU", "TNA", "TZA", "LABU", "LABD",
         "SOXL", "SOXS", "FNGU", "FNGD", "TECL", "TECS", "FAS", "FAZ", "ERX", "ERY",
+    ],
+    
+    # ============ INTERNATIONAL ADRs ============
+    "International - China Tech": [
+        "BABA", "JD", "PDD", "BIDU", "NTES", "TCOM", "BILI", "IQ", "TME", "WB",
+        "VIPS", "YMM", "DIDI", "TAL", "EDU", "GOTU", "LU", "TIGR", "FUTU", "KC",
+    ],
+    "International - China EV": [
+        "NIO", "XPEV", "LI", "BYD", "ZEEKR", "BYDDF",
+    ],
+    "International - Global Giants": [
+        "TSM", "ASML", "SAP", "TM", "SONY", "NVS", "AZN", "GSK", "SNY", "NVO",
+        "UL", "DEO", "BTI", "PM", "BUD", "RIO", "VALE", "BHP", "GOLD", "NEM",
+        "BP", "SHEL", "TTE", "EQNR", "SU", "CNQ", "ENB", "TRP", "MFC", "SLF",
+    ],
+    
+    # ============ CRYPTO & BLOCKCHAIN ============
+    "Crypto Miners": [
+        "MARA", "RIOT", "CLSK", "HUT", "BTBT", "BITF", "IREN", "CIFR", "WULF", "CORZ",
+    ],
+    "Crypto/Blockchain Related": [
+        "COIN", "MSTR", "SQ", "PYPL", "HOOD", "GBTC", "ETHE",
+    ],
+    
+    # ============ RECENT IPOs & GROWTH ============
+    "Recent IPOs": [
+        "RDDT", "BIRK", "ARM", "CART", "TOST", "RBLX", "DUOL", "DOCS", "MNDY", "GTLB",
+        "BRZE", "AMPL", "YOU", "RELY", "FRSH", "GLBE", "CWAN", "ENFN", "VRT", "ONON",
+    ],
+    
+    # ============ DIVIDEND & VALUE ============
+    "High Dividend REITs": [
+        "MPW", "NNN", "STAG", "ADC", "WPC", "AGNC", "NLY", "ARCC", "MAIN", "HTGC",
+        "PSEC", "ORCC", "GBDC", "TPVG", "HRZN", "GLAD", "GAIN", "SLRC", "TCPC", "NMFC",
+    ],
+    "Dividend Aristocrats": [
+        "JNJ", "PG", "KO", "PEP", "MMM", "ABT", "ABBV", "XOM", "CVX", "CL",
+        "CLX", "SYY", "BDX", "ECL", "SHW", "APD", "LIN", "EMR", "ITW", "GWW",
     ],
 }
 
@@ -1067,6 +1177,55 @@ COMPANY_NAMES = {
     "VTI": "Vanguard Total Stock", "VOO": "Vanguard S&P 500", "XLF": "Financial Select SPDR",
     "XLE": "Energy Select SPDR", "XLK": "Technology Select SPDR", "XLV": "Health Care Select SPDR",
     "TQQQ": "ProShares UltraPro QQQ", "SQQQ": "ProShares UltraPro Short QQQ",
+    
+    # AI & Semiconductors
+    "ARM": "ARM Holdings", "SMCI": "Super Micro Computer", "DELL": "Dell Technologies",
+    "HPE": "Hewlett Packard Enterprise", "ANET": "Arista Networks", "PANW": "Palo Alto Networks",
+    "WDAY": "Workday", "ZM": "Zoom", "SPLK": "Splunk", "UBER": "Uber",
+    
+    # Fintech
+    "COIN": "Coinbase", "HOOD": "Robinhood", "SOFI": "SoFi Technologies", "AFRM": "Affirm",
+    "UPST": "Upstart", "LC": "LendingClub", "SQ": "Block (Square)", "PYPL": "PayPal",
+    "V": "Visa", "MA": "Mastercard",
+    
+    # Biotech
+    "MRNA": "Moderna", "BNTX": "BioNTech", "CRSP": "CRISPR Therapeutics",
+    "NTLA": "Intellia Therapeutics", "EDIT": "Editas Medicine", "BEAM": "Beam Therapeutics",
+    "VERV": "Verve Therapeutics", "BLUE": "bluebird bio", "EXEL": "Exelixis",
+    
+    # Defense
+    "NOC": "Northrop Grumman", "GD": "General Dynamics", "LHX": "L3Harris Technologies",
+    "HII": "Huntington Ingalls", "TDG": "TransDigm", "HWM": "Howmet Aerospace",
+    "TXT": "Textron", "LDOS": "Leidos", "SAIC": "Science Applications", "BAH": "Booz Allen Hamilton",
+    
+    # International - China
+    "BABA": "Alibaba", "JD": "JD.com", "PDD": "PDD Holdings (Pinduoduo)", "BIDU": "Baidu",
+    "NTES": "NetEase", "TCOM": "Trip.com", "BILI": "Bilibili", "IQ": "iQIYI",
+    "TME": "Tencent Music", "WB": "Weibo", "NIO": "NIO Inc", "XPEV": "XPeng",
+    "LI": "Li Auto", "BYD": "BYD Company", "TAL": "TAL Education", "EDU": "New Oriental",
+    
+    # International - Global
+    "TSM": "Taiwan Semiconductor", "ASML": "ASML Holding", "SAP": "SAP SE", "TM": "Toyota",
+    "SONY": "Sony", "NVS": "Novartis", "AZN": "AstraZeneca", "GSK": "GSK plc",
+    "SNY": "Sanofi", "NVO": "Novo Nordisk", "UL": "Unilever", "DEO": "Diageo",
+    "BTI": "British American Tobacco", "PM": "Philip Morris", "BUD": "Anheuser-Busch InBev",
+    "RIO": "Rio Tinto", "VALE": "Vale SA", "BHP": "BHP Group", "GOLD": "Barrick Gold",
+    "NEM": "Newmont", "BP": "BP plc", "SHEL": "Shell", "TTE": "TotalEnergies",
+    
+    # Crypto Miners
+    "MARA": "Marathon Digital", "RIOT": "Riot Platforms", "CLSK": "CleanSpark",
+    "HUT": "Hut 8 Mining", "BTBT": "Bit Digital", "BITF": "Bitfarms",
+    "IREN": "Iris Energy", "CIFR": "Cipher Mining", "MSTR": "MicroStrategy",
+    
+    # Recent IPOs
+    "RDDT": "Reddit", "BIRK": "Birkenstock", "CART": "Instacart (Maplebear)",
+    "TOST": "Toast Inc", "RBLX": "Roblox", "DUOL": "Duolingo", "DOCS": "Doximity",
+    "MNDY": "monday.com", "GTLB": "GitLab", "BRZE": "Braze", "ONON": "On Holding",
+    
+    # REITs & Dividend
+    "MPW": "Medical Properties Trust", "NNN": "NNN REIT", "STAG": "STAG Industrial",
+    "ADC": "Agree Realty", "WPC": "W.P. Carey", "AGNC": "AGNC Investment",
+    "NLY": "Annaly Capital", "ARCC": "Ares Capital", "MAIN": "Main Street Capital",
 }
 
 def get_company_name(symbol: str) -> str:
@@ -1091,10 +1250,10 @@ def get_rsi_status(rsi):
         return "Neutral", "gray"
 
 
-def fetch_and_analyze(symbol: str, start: str, end: str, horizon: int):
+def fetch_and_analyze(symbol: str, start: str, end: str, horizon: int, timeframe: str = "1Day"):
     """Fetch data and run analysis for a symbol (uses session caching)."""
     try:
-        df = fetch_with_session_cache(symbol, start, end)
+        df = fetch_with_session_cache(symbol, start, end, timeframe)
         
         if df is None or len(df) == 0:
             return None, f"No data found for {symbol}"
@@ -1183,22 +1342,35 @@ def render_analyzer_tab():
         if custom_symbol and custom_symbol not in selected_symbols:
             selected_symbols.append(custom_symbol)
         
-    # Row 2: Date Range and Parameters
-    param_col1, param_col2, param_col3, param_col4 = st.columns(4)
+    # Row 2: Date Range
+    date_col1, date_col2 = st.columns(2)
     
-    with param_col1:
+    with date_col1:
         start_date = st.date_input("Start Date", value=datetime(2022, 1, 1), key="analyzer_start")
     
-    with param_col2:
+    with date_col2:
         end_date = st.date_input("End Date", value=datetime.now(), key="analyzer_end")
     
-    with param_col3:
-        horizon = st.slider("Prediction Horizon", 1, 20, 5, key="analyzer_horizon_slider",
-                           help="Days ahead to predict")
-    
-    with param_col4:
-        threshold = st.slider("Signal Threshold", 0.5, 0.8, 0.55, 0.05, key="analyzer_threshold_slider",
-                             help="Confidence threshold for signals")
+    # Row 3: Technical Settings
+    with st.expander("⚙️ **Technical Settings**", expanded=True):
+        tech_col1, tech_col2, tech_col3 = st.columns(3)
+        
+        with tech_col1:
+            timeframe = st.selectbox(
+                "TimeFrame",
+                options=["1Day", "1Hour", "30Min", "15Min", "5Min", "1Week"],
+                index=0,
+                key="analyzer_timeframe",
+                help="Data resolution for analysis"
+            )
+        
+        with tech_col2:
+            horizon = st.slider("Prediction Horizon", 1, 20, 5, key="analyzer_horizon_slider",
+                               help="Days ahead to predict")
+        
+        with tech_col3:
+            threshold = st.slider("Signal Threshold", 0.5, 0.8, 0.55, 0.05, key="analyzer_threshold_slider",
+                                 help="Confidence threshold for signals")
     
     # Analyze Button
     analyze_btn = st.button("🔍 Analyze Selected Stocks", type="primary", use_container_width=True, 
@@ -1225,7 +1397,7 @@ def render_analyzer_tab():
         for tab, symbol in zip(tabs, selected_symbols):
             with tab:
                 with st.spinner(f"Analyzing {symbol}..."):
-                    result, error = fetch_and_analyze(symbol, start_str, end_str, horizon)
+                    result, error = fetch_and_analyze(symbol, start_str, end_str, horizon, timeframe)
                 
                 if error:
                     st.error(f"⚠️ {error}")
@@ -1255,14 +1427,14 @@ def render_analyzer_tab():
                 
                 st.divider()
                 
-                # Charts
+                # Charts - auto-zoomed based on selected timeframe
                 st.markdown("#### 📉 Price & Indicators")
-                price_fig = create_price_chart(df, symbol)
+                price_fig = create_price_chart(df, symbol, timeframe=timeframe)
                 st.plotly_chart(price_fig, use_container_width=True)
                 
                 chart_col1, chart_col2 = st.columns(2)
                 with chart_col1:
-                    st.plotly_chart(create_rsi_chart(df, symbol), use_container_width=True)
+                    st.plotly_chart(create_rsi_chart(df, symbol, timeframe=timeframe), use_container_width=True)
                 with chart_col2:
                     st.plotly_chart(create_predictions_chart(df, symbol, model_results.predictions, model_results.probabilities, model_results.test_indices, threshold), use_container_width=True)
     
@@ -1558,6 +1730,29 @@ def render_screener_tab():
         etf_commodity = st.checkbox("Commodities", key="etf_comm")
         etf_leveraged = st.checkbox("Leveraged/Inverse", key="etf_lev")
     
+    # Additional categories row
+    add_col1, add_col2, add_col3, add_col4 = st.columns(4)
+    
+    with add_col1:
+        st.markdown("**🌍 International**")
+        intl_china_tech = st.checkbox("China Tech", key="intl_china_tech")
+        intl_china_ev = st.checkbox("China EV", key="intl_china_ev")
+        intl_global = st.checkbox("Global Giants", key="intl_global")
+    
+    with add_col2:
+        st.markdown("**₿ Crypto/Blockchain**")
+        crypto_miners = st.checkbox("Crypto Miners", key="crypto_miners")
+        crypto_related = st.checkbox("Crypto Related", key="crypto_related")
+    
+    with add_col3:
+        st.markdown("**🚀 Growth**")
+        recent_ipos = st.checkbox("Recent IPOs", key="recent_ipos")
+    
+    with add_col4:
+        st.markdown("**💰 Dividend**")
+        div_reits = st.checkbox("High Dividend REITs", key="div_reits")
+        div_aristocrats = st.checkbox("Dividend Aristocrats", key="div_aristos")
+    
     st.divider()
     
     # Build stock list
@@ -1578,6 +1773,15 @@ def render_screener_tab():
         "ETFs - Growth/Value": etf_growth, "ETFs - International": etf_intl,
         "ETFs - Fixed Income": etf_fixed, "ETFs - Thematic": etf_thematic,
         "ETFs - Commodities": etf_commodity, "ETFs - Leveraged/Inverse": etf_leveraged,
+        # New categories
+        "International - China Tech": intl_china_tech,
+        "International - China EV": intl_china_ev,
+        "International - Global Giants": intl_global,
+        "Crypto Miners": crypto_miners,
+        "Crypto/Blockchain Related": crypto_related,
+        "Recent IPOs": recent_ipos,
+        "High Dividend REITs": div_reits,
+        "Dividend Aristocrats": div_aristocrats,
     }
     
     for category, selected in category_selections.items():
@@ -1590,17 +1794,24 @@ def render_screener_tab():
     # SCAN CONTROLS
     # ==========================================================================
     
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
+    st.caption(f"📊 Will scan **{len(stocks_to_scan)}** stocks across selected categories")
     
-    with ctrl_col1:
-        st.caption(f"📊 Will scan **{len(stocks_to_scan)}** stocks across selected categories")
-    
-    with ctrl_col2:
-        max_results = st.number_input("Max Results", min_value=5, max_value=100, value=30)
-    
-    with ctrl_col3:
-        lookback_days = st.number_input("Lookback (days)", min_value=100, max_value=500, value=400,
-                                        help="Days of data to fetch (400 recommended for 52-week metrics)")
+    # Technical Settings
+    with st.expander("⚙️ **Technical Settings**", expanded=False):
+        tech_col1, tech_col2 = st.columns(2)
+        
+        with tech_col1:
+            screener_timeframe = st.selectbox(
+                "TimeFrame",
+                options=["1Day", "1Hour", "30Min", "15Min", "5Min", "1Week"],
+                index=0,
+                key="screener_timeframe",
+                help="Data resolution for analysis"
+            )
+        
+        with tech_col2:
+            lookback_days = st.number_input("Lookback (days)", min_value=100, max_value=500, value=400,
+                                            help="Days of data to fetch (400 recommended for 52-week metrics)")
     
     # Build criteria dictionary
         criteria = {
@@ -1649,6 +1860,26 @@ def render_screener_tab():
                     st.error("Failed to save")
     
     # ==========================================================================
+    # TRADEABLE SYMBOLS STATUS & REFRESH
+    # ==========================================================================
+    
+    # Show tradeable symbols status
+    tradeable_status = get_tradeable_symbols_status()
+    status_col1, status_col2 = st.columns([3, 1])
+    
+    with status_col1:
+        if tradeable_status["error"]:
+            st.warning(f"⚠️ Could not fetch tradeable symbols: {tradeable_status['error'][:50]}...")
+        elif tradeable_status["count"] > 0:
+            timestamp_str = tradeable_status["timestamp"].strftime("%H:%M:%S") if tradeable_status["timestamp"] else "N/A"
+            st.caption(f"📊 {tradeable_status['count']:,} tradeable symbols loaded (as of {timestamp_str})")
+    
+    with status_col2:
+        if st.button("🔄 Refresh", key="refresh_tradeable", help="Refresh tradeable symbols list from Alpaca"):
+            refresh_tradeable_symbols()
+            st.rerun()
+    
+    # ==========================================================================
     # RUN SCAN
     # ==========================================================================
     
@@ -1660,6 +1891,13 @@ def render_screener_tab():
         if not stocks_to_scan:
             st.warning("⚠️ Please select at least one stock category")
             return
+        
+        # Pre-filter against live tradeable symbols
+        with st.spinner("Filtering against tradeable symbols..."):
+            filtered_stocks, removed_stocks = filter_to_tradeable(stocks_to_scan)
+        
+        # Store removed stocks for display
+        st.session_state.removed_symbols = removed_stocks
         
         # Date range
         start_str = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
@@ -1674,11 +1912,12 @@ def render_screener_tab():
             progress_bar.progress(scanned / total)
             status_text.text(f"Scanning {symbol}... ({scanned}/{total}) | Found: {matches_count}")
         
-        # Run parallel scan
+        # Run parallel scan on filtered stocks
         with st.spinner("Initializing scan..."):
             matches, errors, scanned = parallel_scan_stocks(
-                stocks_to_scan, start_str, end_str, criteria,
-                max_results=max_results, progress_callback=update_progress
+                filtered_stocks, start_str, end_str, criteria,
+                progress_callback=update_progress,
+                timeframe=screener_timeframe
             )
         
         progress_bar.empty()
@@ -1686,16 +1925,64 @@ def render_screener_tab():
         
         # Store results in session state
         st.session_state.screener_results = matches
+        st.session_state.screener_errors = errors
         
-        # Show errors summary if any
-        if errors:
-            with st.expander(f"⚠️ {len(errors)} symbols had errors", expanded=False):
-                for sym, err in list(errors.items())[:15]:
-                    company = get_company_name(sym)
-                    display_name = f"{sym} ({company})" if company != sym else sym
-                    st.caption(f"• {display_name}: {err}")
-                if len(errors) > 15:
-                    st.caption(f"... and {len(errors) - 15} more symbols with similar issues")
+        # ==========================================================================
+        # DISPLAY FILTERING SUMMARY
+        # ==========================================================================
+        
+        # Categorize errors
+        no_data_errors = {s: e for s, e in errors.items() if "No data" in e}
+        insufficient_data_errors = {s: e for s, e in errors.items() if "Insufficient" in e}
+        api_errors = {s: e for s, e in errors.items() if s not in no_data_errors and s not in insufficient_data_errors}
+        
+        # Summary counts
+        total_removed = len(removed_stocks)
+        total_no_data = len(no_data_errors)
+        total_insufficient = len(insufficient_data_errors)
+        total_api_errors = len(api_errors)
+        
+        # Show filtering summary if anything was filtered/errored
+        if total_removed > 0 or errors:
+            with st.expander(f"📋 Filtering Summary: {total_removed} filtered, {len(errors)} errors", expanded=False):
+                # Pre-filtered (not tradeable)
+                if removed_stocks:
+                    st.markdown(f"**🚫 Not Tradeable ({len(removed_stocks)}):** Delisted, acquired, or not available")
+                    removed_display = []
+                    for sym in sorted(removed_stocks)[:20]:
+                        company = get_company_name(sym)
+                        removed_display.append(f"{sym} ({company})" if company != sym else sym)
+                    st.caption(" • ".join(removed_display))
+                    if len(removed_stocks) > 20:
+                        st.caption(f"... and {len(removed_stocks) - 20} more")
+                
+                # No data errors (fallback caught)
+                if no_data_errors:
+                    st.markdown(f"**📭 No Data ({len(no_data_errors)}):** No market data available")
+                    no_data_display = []
+                    for sym in sorted(no_data_errors.keys())[:10]:
+                        company = get_company_name(sym)
+                        no_data_display.append(f"{sym} ({company})" if company != sym else sym)
+                    st.caption(" • ".join(no_data_display))
+                    if len(no_data_errors) > 10:
+                        st.caption(f"... and {len(no_data_errors) - 10} more")
+                
+                # Insufficient data
+                if insufficient_data_errors:
+                    st.markdown(f"**📉 Insufficient Data ({len(insufficient_data_errors)}):** Not enough history")
+                    insuff_display = []
+                    for sym in sorted(insufficient_data_errors.keys())[:10]:
+                        company = get_company_name(sym)
+                        insuff_display.append(f"{sym} ({company})" if company != sym else sym)
+                    st.caption(" • ".join(insuff_display))
+                
+                # API errors
+                if api_errors:
+                    st.markdown(f"**⚠️ API Errors ({len(api_errors)}):** Temporary issues")
+                    for sym, err in list(api_errors.items())[:5]:
+                        company = get_company_name(sym)
+                        display_name = f"{sym} ({company})" if company != sym else sym
+                        st.caption(f"• {display_name}: {err[:50]}...")
     
     # ==========================================================================
     # DISPLAY RESULTS
@@ -1830,20 +2117,20 @@ def render_screener_tab():
                             # Fetch data for charts (uses session caching)
                             chart_start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
                             chart_end = datetime.now().strftime("%Y-%m-%d")
-                            chart_df = fetch_with_session_cache(selected_symbol, chart_start, chart_end)
+                            chart_df = fetch_with_session_cache(selected_symbol, chart_start, chart_end, screener_timeframe)
                             
                             if chart_df is not None and len(chart_df) >= 50:
                                 # Compute indicators for charts
                                 chart_df = compute_all_indicators(chart_df)
                                 
-                                # Price chart (same as Analyzer)
-                                price_fig = create_price_chart(chart_df, selected_symbol)
+                                # Price chart (same as Analyzer) - auto-zoomed based on timeframe
+                                price_fig = create_price_chart(chart_df, selected_symbol, timeframe=screener_timeframe)
                                 st.plotly_chart(price_fig, use_container_width=True)
                                 
-                                # RSI chart (same as Analyzer)
+                                # RSI chart (same as Analyzer) - auto-zoomed based on timeframe
                                 chart_col1, chart_col2 = st.columns(2)
                                 with chart_col1:
-                                    rsi_fig = create_rsi_chart(chart_df, selected_symbol)
+                                    rsi_fig = create_rsi_chart(chart_df, selected_symbol, timeframe=screener_timeframe)
                                     st.plotly_chart(rsi_fig, use_container_width=True)
                                 
                                 # ML Prediction section (if enabled)
