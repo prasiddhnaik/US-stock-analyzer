@@ -1,5 +1,5 @@
 # 📈 Stock Analyzer - System Architecture
-
+  open preview mode using Ctrl + Shift + V
 > ML-powered stock analysis with technical indicators and screening capabilities
 
 ---
@@ -227,47 +227,49 @@ flowchart TB
 
 ---
 
-## 🔎 Stock Screener Tab - Detailed Flow
+# 🔎 Stock Screener Tab - Detailed Flow
 
 ```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '18px', 'fontFamily': 'arial'}}}%%
 flowchart TB
-    subgraph PRESET["💾 Preset System"]
-        BUILT_IN[Built-in Presets<br/>Oversold Bounce,<br/>Golden Cross, etc.]
-        USER_PRESETS[User Presets<br/>screener_presets.json]
-        LOAD_PRESET[Load Preset]
-        SAVE_PRESET[Save Preset]
+    subgraph PRESET["<big>💾 PRESET SYSTEM</big>"]
+        BUILT_IN["<b>Built-in Presets</b><br/>Oversold Bounce,<br/>Golden Cross, etc."]
+        USER_PRESETS["<b>User Presets</b><br/>screener_presets.json"]
+        LOAD_PRESET["<b>Load Preset</b>"]
+        SAVE_PRESET["<b>Save Preset</b>"]
     end
 
-    subgraph CRITERIA["🎯 Filter Criteria"]
+    subgraph CRITERIA["<big>🎯 FILTER CRITERIA</big>"]
         direction LR
-        RSI_CRIT[RSI Conditions<br/>Oversold < 30<br/>Overbought > 70]
-        MACD_CRIT[MACD Conditions<br/>Bullish/Bearish]
-        BB_CRIT[Bollinger Bands<br/>Near Lower/Upper]
-        SMA_CRIT[SMA Crossovers<br/>Golden/Death Cross]
-        PRICE_SMA[Price vs SMA<br/>Above/Below]
-        VOLUME_CRIT[Volume Filters<br/>Spike, Above Avg]
-        WEEK52_CRIT[52-Week Position<br/>Near High/Low]
-        ATR_CRIT[Volatility<br/>ATR Percentile]
+        RSI_CRIT["<b>RSI Conditions</b><br/>Oversold < 30<br/>Overbought > 70"]
+        MACD_CRIT["<b>MACD Conditions</b><br/>Bullish/Bearish"]
+        BB_CRIT["<b>Bollinger Bands</b><br/>Near Lower/Upper"]
+        SMA_CRIT["<b>SMA Crossovers</b><br/>Golden/Death Cross"]
+        PRICE_SMA["<b>Price vs SMA</b><br/>Above/Below"]
+        VOLUME_CRIT["<b>Volume Filters</b><br/>Spike, Above Avg"]
+        WEEK52_CRIT["<b>52-Week Position</b><br/>Near High/Low"]
+        ATR_CRIT["<b>Volatility</b><br/>ATR Percentile"]
     end
 
-    subgraph UNIVERSE["🌍 Stock Universe"]
-        SP500[S&P 500<br/>~500 Symbols]
-        CUSTOM_POOL[Custom Pool]
+    subgraph UNIVERSE["<big>🌍 STOCK UNIVERSE</big>"]
+        SP500["<b>S&P 500</b><br/>~500 Symbols"]
+        CUSTOM_POOL["<b>Custom Pool</b>"]
     end
 
-    subgraph SCAN["⚡ Parallel Scanning"]
-        POOL[ThreadPoolExecutor<br/>Max 10 Workers]
-        RATE[Rate Limiter<br/>5 Concurrent]
-        FETCH_EACH[Fetch Each Symbol]
-        CALC_IND[Compute Indicators]
-        CHECK_CRIT[Check Criteria<br/>Early Exit]
+    subgraph SCAN["<big>⚡ PARALLEL SCANNING</big>"]
+        POOL["<b>ThreadPoolExecutor</b><br/>Max 10 Workers"]
+        RATE["<b>Rate Limiter</b><br/>5 Concurrent"]
+        FETCH_EACH["<b>Fetch Each Symbol</b>"]
+        CALC_IND["<b>Compute Indicators</b>"]
     end
 
-    subgraph RESULTS["📋 Results"]
-        MATCHES[Matching Stocks]
-        TABLE[Sortable Table<br/>Symbol, Price,<br/>Change, RSI, etc.]
-        DETAIL[Detail View<br/>Charts on Click]
-        ML_SCORE[ML Predictions<br/>Optional]
+    CHECK_CRIT["<b>🔍 Check Criteria</b><br/>Early Exit"]
+
+    subgraph RESULTS["<big>📋 RESULTS</big>"]
+        MATCHES["<b>Matching Stocks</b>"]
+        TABLE["<b>Sortable Table</b><br/>Symbol, Company Name,<br/>Price, Change, RSI, etc."]
+        DETAIL["<b>Detail View</b><br/>Charts on Click"]
+        ML_SCORE["<b>ML Predictions</b><br/>Optional"]
     end
 
     BUILT_IN --> LOAD_PRESET
@@ -303,6 +305,7 @@ flowchart TB
 
     style SCAN fill:#1e3a5f,stroke:#3b82f6,color:#fff
     style RESULTS fill:#365314,stroke:#84cc16,color:#fff
+    style CHECK_CRIT fill:#7c3aed,stroke:#a78bfa,color:#fff,stroke-width:3px
 ```
 
 ---

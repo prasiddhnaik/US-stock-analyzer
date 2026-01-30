@@ -42,13 +42,47 @@ def ensure_output_dir() -> Path:
     return output_dir
 
 
+def get_zoom_range(df: pd.DataFrame, timeframe: str = "1Day") -> tuple:
+    """
+    Calculate appropriate x-axis zoom range based on timeframe.
+    Returns (start_date, end_date) for the initial zoom view.
+    """
+    if df.empty:
+        return None, None
+    
+    end_date = df.index[-1]
+    
+    # Define bars to show based on timeframe for optimal viewing
+    # These values show ~1-2 weeks of trading for intraday, ~3 months for daily
+    bars_to_show = {
+        "1Min": 390 * 2,   # ~2 days of minute bars
+        "5Min": 78 * 5,    # ~5 days of 5-min bars  
+        "15Min": 26 * 7,   # ~7 days of 15-min bars
+        "30Min": 13 * 10,  # ~10 days of 30-min bars
+        "1Hour": 7 * 14,   # ~14 days of hourly bars
+        "1Day": 90,        # ~3 months of daily bars
+        "1Week": 52,       # ~1 year of weekly bars
+        "1Month": 24,      # ~2 years of monthly bars
+    }
+    
+    num_bars = bars_to_show.get(timeframe, 90)
+    
+    # Calculate start index (ensure we don't go negative)
+    start_idx = max(0, len(df) - num_bars)
+    start_date = df.index[start_idx]
+    
+    return start_date, end_date
+
+
 def create_price_chart(
     df: pd.DataFrame,
     symbol: str,
-    use_candlestick: bool = True
+    use_candlestick: bool = True,
+    timeframe: str = "1Day"
 ) -> go.Figure:
     """
     Create price chart with SMA lines and Bollinger Bands.
+    Auto-zooms to appropriate range based on timeframe.
     """
     # Create subplots: price + volume
     fig = make_subplots(
@@ -155,6 +189,21 @@ def create_price_chart(
             hovertemplate="Vol: %{y:,.0f}<extra></extra>"
         ), row=2, col=1)
     
+    # --- Calculate zoom range based on timeframe ---
+    zoom_start, zoom_end = get_zoom_range(df, timeframe)
+    
+    # Build xaxis config with zoom range
+    xaxis_config = dict(
+        rangeslider=dict(visible=False),
+        showgrid=True,
+        gridcolor=COLORS["grid"],
+        tickfont=dict(color=COLORS["text_secondary"])
+    )
+    
+    # Apply zoom range if calculated
+    if zoom_start is not None and zoom_end is not None:
+        xaxis_config["range"] = [zoom_start, zoom_end]
+    
     # --- Layout ---
     fig.update_layout(
         title=dict(
@@ -179,16 +228,12 @@ def create_price_chart(
         ),
         height=550,
         margin=dict(l=60, r=20, t=60, b=40),
-        xaxis=dict(
-            rangeslider=dict(visible=False),
-            showgrid=True,
-            gridcolor=COLORS["grid"],
-            tickfont=dict(color=COLORS["text_secondary"])
-        ),
+        xaxis=xaxis_config,
         xaxis2=dict(
             showgrid=True,
             gridcolor=COLORS["grid"],
-            tickfont=dict(color=COLORS["text_secondary"])
+            tickfont=dict(color=COLORS["text_secondary"]),
+            range=[zoom_start, zoom_end] if zoom_start is not None else None
         ),
         yaxis=dict(
             title=dict(text="Price ($)", font=dict(color=COLORS["text"])),
@@ -210,9 +255,10 @@ def create_price_chart(
     return fig
 
 
-def create_rsi_chart(df: pd.DataFrame, symbol: str) -> go.Figure:
+def create_rsi_chart(df: pd.DataFrame, symbol: str, timeframe: str = "1Day") -> go.Figure:
     """
     Create RSI chart with overbought/oversold zones.
+    Auto-zooms to appropriate range based on timeframe.
     """
     fig = go.Figure()
     
@@ -266,6 +312,19 @@ def create_rsi_chart(df: pd.DataFrame, symbol: str) -> go.Figure:
                   annotation_font=dict(color=COLORS["oversold"], size=10))
     fig.add_hline(y=50, line_dash="dot", line_color="#64748b", line_width=1)
     
+    # Calculate zoom range based on timeframe
+    zoom_start, zoom_end = get_zoom_range(df, timeframe)
+    
+    # Build xaxis config with zoom range
+    xaxis_config = dict(
+        showgrid=True,
+        gridcolor=COLORS["grid"],
+        tickfont=dict(color=COLORS["text_secondary"])
+    )
+    
+    if zoom_start is not None and zoom_end is not None:
+        xaxis_config["range"] = [zoom_start, zoom_end]
+    
     # Layout
     fig.update_layout(
         title=dict(
@@ -282,11 +341,7 @@ def create_rsi_chart(df: pd.DataFrame, symbol: str) -> go.Figure:
         showlegend=False,
         height=300,
         margin=dict(l=50, r=50, t=50, b=40),
-        xaxis=dict(
-            showgrid=True,
-            gridcolor=COLORS["grid"],
-            tickfont=dict(color=COLORS["text_secondary"])
-        ),
+        xaxis=xaxis_config,
         yaxis=dict(
             title=dict(text="RSI", font=dict(color=COLORS["text"])),
             range=[0, 100],
