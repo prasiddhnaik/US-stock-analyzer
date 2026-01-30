@@ -127,5 +127,3 @@ if st.button("Refresh Tradeable Symbols"):
 ### 6. Display Filtering Summary
 
 Show users what was filtered and why:
-
-- "X symbols filtered (not tradeable)"  
