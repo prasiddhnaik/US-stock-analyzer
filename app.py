@@ -2164,6 +2164,156 @@ def render_screener_tab():
                                                     st.metric("Model Accuracy", f"{accuracy:.1%}")
                                         except Exception as e:
                                             st.warning(f"ML prediction unavailable: {e}")
+                                
+                                # ==========================================================
+                                # SINGLE DAY VIEWER (when timeframe is 1Day)
+                                # ==========================================================
+                                if screener_timeframe == "1Day":
+                                    st.divider()
+                                    st.markdown(f"##### 📅 Single Day View - {selected_symbol}")
+                                    
+                                    # Get available dates from the data
+                                    available_dates = chart_df.index.date
+                                    date_options = sorted(set(available_dates), reverse=True)  # Most recent first
+                                    
+                                    # Date selector dropdown
+                                    selected_date = st.selectbox(
+                                        "Select a day to view details:",
+                                        options=date_options,
+                                        format_func=lambda x: x.strftime("%Y-%m-%d (%A)"),
+                                        key=f"day_select_{selected_symbol}"
+                                    )
+                                    
+                                    if selected_date:
+                                        # Get data for the selected day
+                                        day_data = chart_df[chart_df.index.date == selected_date]
+                                        
+                                        if len(day_data) > 0:
+                                            row = day_data.iloc[0]
+                                            
+                                            # Calculate daily change
+                                            prev_idx = chart_df.index.get_loc(day_data.index[0])
+                                            if prev_idx > 0:
+                                                prev_close = chart_df.iloc[prev_idx - 1]["close"]
+                                                daily_change = ((row["close"] - prev_close) / prev_close) * 100
+                                                daily_change_abs = row["close"] - prev_close
+                                            else:
+                                                daily_change = ((row["close"] - row["open"]) / row["open"]) * 100
+                                                daily_change_abs = row["close"] - row["open"]
+                                            
+                                            # Display single day metrics
+                                            st.markdown(f"**{selected_date.strftime('%B %d, %Y')}**")
+                                            
+                                            day_col1, day_col2, day_col3, day_col4 = st.columns(4)
+                                            
+                                            with day_col1:
+                                                st.metric("Open", f"${row['open']:.2f}")
+                                            with day_col2:
+                                                st.metric("High", f"${row['high']:.2f}")
+                                            with day_col3:
+                                                st.metric("Low", f"${row['low']:.2f}")
+                                            with day_col4:
+                                                delta_str = f"{daily_change:+.2f}%"
+                                                st.metric("Close", f"${row['close']:.2f}", delta=delta_str)
+                                            
+                                            day_col5, day_col6, day_col7, day_col8 = st.columns(4)
+                                            
+                                            with day_col5:
+                                                vol_fmt = f"{row['volume']:,.0f}" if row['volume'] < 1_000_000 else f"{row['volume']/1_000_000:.2f}M"
+                                                st.metric("Volume", vol_fmt)
+                                            with day_col6:
+                                                day_range = row['high'] - row['low']
+                                                st.metric("Day Range", f"${day_range:.2f}")
+                                            with day_col7:
+                                                if 'vwap' in row and row['vwap']:
+                                                    st.metric("VWAP", f"${row['vwap']:.2f}")
+                                                else:
+                                                    st.metric("VWAP", "N/A")
+                                            with day_col8:
+                                                st.metric("Change", f"${daily_change_abs:+.2f}")
+                                            
+                                            # Single day OHLC bar chart
+                                            day_fig = go.Figure()
+                                            
+                                            # Candlestick for the single day
+                                            color = "#22c55e" if row["close"] >= row["open"] else "#ef4444"
+                                            
+                                            day_fig.add_trace(go.Candlestick(
+                                                x=[selected_date],
+                                                open=[row["open"]],
+                                                high=[row["high"]],
+                                                low=[row["low"]],
+                                                close=[row["close"]],
+                                                increasing_line_color="#22c55e",
+                                                decreasing_line_color="#ef4444",
+                                                increasing_fillcolor="#22c55e",
+                                                decreasing_fillcolor="#ef4444",
+                                                name="OHLC"
+                                            ))
+                                            
+                                            day_fig.update_layout(
+                                                title=f"{selected_symbol} - {selected_date.strftime('%Y-%m-%d')}",
+                                                yaxis_title="Price ($)",
+                                                xaxis_title="",
+                                                template="plotly_dark",
+                                                paper_bgcolor="rgba(0,0,0,0)",
+                                                plot_bgcolor="rgba(10,10,20,0.8)",
+                                                height=300,
+                                                showlegend=False,
+                                                xaxis=dict(
+                                                    rangeslider=dict(visible=False),
+                                                    type="category"
+                                                ),
+                                                margin=dict(l=60, r=20, t=40, b=40)
+                                            )
+                                            
+                                            # Volume bar below
+                                            vol_fig = go.Figure()
+                                            vol_fig.add_trace(go.Bar(
+                                                x=[selected_date],
+                                                y=[row["volume"]],
+                                                marker_color=color,
+                                                name="Volume"
+                                            ))
+                                            
+                                            vol_fig.update_layout(
+                                                yaxis_title="Volume",
+                                                xaxis_title="",
+                                                template="plotly_dark",
+                                                paper_bgcolor="rgba(0,0,0,0)",
+                                                plot_bgcolor="rgba(10,10,20,0.8)",
+                                                height=150,
+                                                showlegend=False,
+                                                xaxis=dict(type="category"),
+                                                margin=dict(l=60, r=20, t=10, b=40)
+                                            )
+                                            
+                                            chart_day_col1, chart_day_col2 = st.columns([2, 1])
+                                            with chart_day_col1:
+                                                st.plotly_chart(day_fig, use_container_width=True)
+                                            with chart_day_col2:
+                                                st.plotly_chart(vol_fig, use_container_width=True)
+                                            
+                                            # Show indicators for that day if available
+                                            if 'rsi_14' in row and 'macd_hist' in row:
+                                                ind_col1, ind_col2, ind_col3, ind_col4 = st.columns(4)
+                                                with ind_col1:
+                                                    rsi_val = row.get('rsi_14')
+                                                    rsi_status = "Oversold" if rsi_val and rsi_val < 30 else ("Overbought" if rsi_val and rsi_val > 70 else "Neutral")
+                                                    st.metric("RSI (14)", f"{rsi_val:.1f}" if rsi_val else "N/A", delta=rsi_status)
+                                                with ind_col2:
+                                                    macd_val = row.get('macd_hist')
+                                                    macd_status = "Bullish" if macd_val and macd_val > 0 else "Bearish"
+                                                    st.metric("MACD Hist", f"{macd_val:.4f}" if macd_val else "N/A", delta=macd_status)
+                                                with ind_col3:
+                                                    sma20 = row.get('sma_20')
+                                                    st.metric("SMA 20", f"${sma20:.2f}" if sma20 else "N/A")
+                                                with ind_col4:
+                                                    sma50 = row.get('sma_50')
+                                                    st.metric("SMA 50", f"${sma50:.2f}" if sma50 else "N/A")
+                                        else:
+                                            st.warning(f"No data available for {selected_date}")
+                                
                             else:
                                 st.warning(f"Insufficient data to display charts for {selected_symbol}")
                         except Exception as e:
