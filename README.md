@@ -8,6 +8,8 @@ A web-based stock analysis tool that fetches US stock data from Alpaca Markets, 
 
 - **Stock Analyzer**: Analyze individual stocks with ML-powered predictions
 - **Stock Screener**: Scan 500+ stocks across all market caps to find matches based on technical criteria
+- **Live Symbol Filtering**: Automatically filters out delisted/acquired stocks using Alpaca's live assets API
+- **Single Day Viewer**: Drill down into any day's OHLC data with detailed metrics
 
 ## Quick Start
 
@@ -24,15 +26,16 @@ pip install -r requirements.txt
 
 ### 2. Set Up Alpaca API Credentials
 
-> ⚠️ **You need 2 API credentials**: an API Key AND an API Secret
+> ⚠️ **You need 2 sets of API credentials** (4 keys total) for full functionality
 
 #### How to Get Your API Keys (Free):
 
 1. **Sign up** at [alpaca.markets](https://alpaca.markets) (free account)
 2. **Log in** to [app.alpaca.markets](https://app.alpaca.markets)
 3. Click **"API Keys"** in the left sidebar
-4. Click **"Generate New Key"**
-5. **Copy both** the Key AND Secret immediately (secret is only shown once!)
+4. Click **"Generate New Key"** - this is your first key pair (for market data)
+5. Click **"Generate New Key"** again - this is your second key pair (for trading/assets API)
+6. **Copy all keys** immediately (secrets are only shown once!)
 
 #### Create Your .env File:
 
@@ -44,16 +47,23 @@ touch .env
 Add your credentials:
 
 ```env
-ALPACA_API_KEY=your_api_key_here
-ALPACA_API_SECRET=your_api_secret_here
+# First key pair - for fetching OHLCV market data
+ALPACA_API_KEY=your_first_api_key_here
+ALPACA_API_SECRET=your_first_api_secret_here
+
+# Second key pair - for live tradeable symbols list
+ALPACA_TRADING_KEY=your_second_api_key_here
+ALPACA_TRADING_SECRET=your_second_api_secret_here
 ```
 
-| Credential | What it looks like |
-|------------|-------------------|
-| API Key | Starts with `PK`, ~20 characters |
-| API Secret | ~40 characters, mixed case |
+| Credential | Purpose | What it looks like |
+|------------|---------|-------------------|
+| ALPACA_API_KEY | Market data (OHLCV) | Starts with `PK`, ~20 characters |
+| ALPACA_API_SECRET | Market data auth | ~40 characters, mixed case |
+| ALPACA_TRADING_KEY | Live assets API | Starts with `PK`, ~20 characters |
+| ALPACA_TRADING_SECRET | Assets API auth | ~40 characters, mixed case |
 
-> 🔒 **Security**: Never share your API secret or commit `.env` to git!
+> 🔒 **Security**: Never share your API secrets or commit `.env` to git!
 
 ### 3. Run the Web App
 
@@ -83,6 +93,12 @@ The app will open automatically at **http://localhost:8501**
 
 Find stocks matching your technical criteria across the entire market.
 
+**Live Symbol Filtering:**
+- Automatically fetches tradeable symbols from Alpaca's Assets API
+- Filters out delisted, acquired, and unavailable stocks before scanning
+- Shows filtering summary: not tradeable, no data, insufficient data, API errors
+- Refresh button to update the tradeable symbols cache
+
 **Select Technical Criteria:**
 - RSI: Oversold (<30), Overbought (>70), or custom range
 - MACD: Bullish or Bearish histogram
@@ -101,6 +117,15 @@ Find stocks matching your technical criteria across the entire market.
 | 📊 ETFs | Index funds, sector funds, leveraged |
 
 Click **"Scan Market"** to find matching stocks.
+
+**📅 Single Day Viewer:**
+
+When timeframe is set to "1Day", a day picker appears below the charts:
+- Select any date from the dropdown to view that day's data
+- See OHLC metrics: Open, High, Low, Close with daily change %
+- View volume, day range, VWAP, and absolute change
+- Single candlestick chart with volume bar
+- Technical indicators (RSI, MACD, SMAs) for that specific day
 
 ## Technical Indicators Computed
 
@@ -146,8 +171,19 @@ stock-analyzer/
 ## Troubleshooting
 
 **"No data found" error:**
-- Check your Alpaca API credentials
+- Check your Alpaca API credentials (ALPACA_API_KEY / ALPACA_API_SECRET)
 - Free accounts use IEX feed (may have delayed/limited data)
+- Stock may be delisted or acquired - check the filtering summary
+
+**"Missing ALPACA_TRADING_KEY" error:**
+- You need a second API key pair for the live assets feature
+- Generate another key in your Alpaca dashboard
+- Add ALPACA_TRADING_KEY and ALPACA_TRADING_SECRET to your .env file
+
+**"Could not fetch tradeable symbols" warning:**
+- Check your ALPACA_TRADING_KEY credentials
+- Click the "Refresh" button to retry
+- The app will still work but won't pre-filter unavailable stocks
 
 **App won't start:**
 - Make sure virtual environment is activated
