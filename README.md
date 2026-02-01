@@ -11,6 +11,21 @@ A web-based stock analysis tool that fetches US stock data from Alpaca Markets, 
 - **Live Symbol Filtering**: Automatically filters out delisted/acquired stocks using Alpaca's live assets API
 - **Single Day Viewer**: Drill down into any day's OHLC data with detailed metrics
 
+## Tech Stack
+
+| Category | Technology | Purpose |
+|----------|------------|---------|
+| **Language** | Python 3.10+ | Core runtime |
+| **Web Framework** | Streamlit | Interactive web UI |
+| **Data API** | Alpaca-Py | Real-time & historical market data |
+| **Data Processing** | Pandas, NumPy | DataFrames, numerical operations |
+| **Technical Analysis** | TA-Lib (ta) | RSI, MACD, Bollinger Bands, SMAs |
+| **Machine Learning** | scikit-learn | Logistic Regression, StandardScaler |
+| **Visualization** | Plotly | Interactive candlestick & line charts |
+| **Caching** | PyArrow (Parquet) | Fast local data persistence |
+| **CLI Output** | Rich | Styled terminal tables & progress |
+| **Config** | python-dotenv | Environment variable management |
+
 ## Quick Start
 
 ### 1. Install Dependencies
