@@ -1,0 +1,28 @@
+INFO:     Started server process [7680]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+============================================================
+Stock Analyzer API Server
+============================================================
+
+Features:
+  - Per-IP rate limiting (30/min, 200/hour)
+  - Per-user rate limiting with API key (60/min, 500/hour)
+  - Input validation and sanitization
+  - ML-powered stock analysis
+
+Endpoints:
+  - GET  /api/health      - Health check
+  - GET  /api/rate-limit  - Rate limit status
+  - GET  /api/symbols     - Tradeable symbols
+  - POST /api/analyze     - Analyze stock
+  - POST /api/screener    - Scan stocks
+
+Docs: http://localhost:8000/docs
+============================================================
+INFO:     127.0.0.1:50490 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50492 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50494 - "GET /api/rate-limit HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64193 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64193 - "GET /favicon.ico HTTP/1.1" 404 Not Found
