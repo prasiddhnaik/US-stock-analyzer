@@ -1,0 +1,134 @@
+# Project configuration
+# Centralizes tool settings for Black, isort, mypy, pytest
+
+[project]
+name = "stock-analyzer"
+version = "1.0.0"
+description = "ML-powered stock analysis with technical indicators"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Prasiddh Naik"}
+]
+keywords = ["stocks", "trading", "machine-learning", "technical-analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/prasiddhnaik/stock-analyzer"
+Documentation = "https://github.com/prasiddhnaik/stock-analyzer#readme"
+Repository = "https://github.com/prasiddhnaik/stock-analyzer"
+
+# ============================================
+# Black Configuration
+# ============================================
+[tool.black]
+line-length = 120
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.venv
+    | venv
+    | __pycache__
+    | \.pytest_cache
+    | outputs
+    | cache
+)/
+'''
+
+# ============================================
+# isort Configuration
+# ============================================
+[tool.isort]
+profile = "black"
+line_length = 120
+skip = [".git", ".venv", "venv", "__pycache__", "outputs"]
+known_first_party = ["data_fetcher", "indicators", "model", "charts", "rate_limiter", "input_validator"]
+known_third_party = ["streamlit", "fastapi", "pandas", "numpy", "sklearn", "plotly", "alpaca"]
+
+# ============================================
+# MyPy Configuration
+# ============================================
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = [
+    "venv",
+    ".venv",
+    "tests",
+    "outputs",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "alpaca.*",
+    "ta.*",
+    "streamlit.*",
+    "plotly.*",
+]
+ignore_missing_imports = true
+
+# ============================================
+# Pytest Configuration
+# ============================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+# ============================================
+# Coverage Configuration
+# ============================================
+[tool.coverage.run]
+source = ["data_fetcher", "indicators", "model", "rate_limiter", "input_validator"]
+omit = [
+    "tests/*",
+    "venv/*",
+    ".venv/*",
+    "*/__pycache__/*",
+    "app.py",
+    "main.py",
+    "api_server.py",
+    "charts.py",
+    "display.py",
+    "visualization.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+fail_under = 50
+
+# ============================================
+# Bandit Configuration
+# ============================================
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv"]
+skips = ["B101"]  # Skip assert warnings in tests

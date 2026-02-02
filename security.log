@@ -1,0 +1,29 @@
+2026-02-02 23:02:22 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 127.0.0.1
+2026-02-02 23:02:22 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 10.0.0.1
+2026-02-02 23:02:22 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 192.168.1.1
+2026-02-02 23:02:22 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 172.16.0.1
+2026-02-02 23:02:30 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 127.0.0.1
+2026-02-02 23:02:30 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 10.0.0.1
+2026-02-02 23:02:30 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 192.168.1.1
+2026-02-02 23:02:30 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 172.16.0.1
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 127.0.0.1
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 10.0.0.1
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 192.168.1.1
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 172.16.0.1
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to api.alpaca.markets (allow_external=False)
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to evil.com (allow_external=False)
+2026-02-02 23:09:28 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked non-allowlisted domain: evil.com
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 127.0.0.1
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 10.0.0.1
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 192.168.1.1
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 172.16.0.1
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to api.alpaca.markets (allow_external=False)
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to evil.com (allow_external=False)
+2026-02-02 23:09:36 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked non-allowlisted domain: evil.com
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 127.0.0.1
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 10.0.0.1
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 192.168.1.1
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked SSRF attempt to 172.16.0.1
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to api.alpaca.markets (allow_external=False)
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked external domain access to evil.com (allow_external=False)
+2026-02-02 23:13:31 | WARNING | event=ssrf_attempt | ip=inte*** | user=anonymous | details=Blocked non-allowlisted domain: evil.com
