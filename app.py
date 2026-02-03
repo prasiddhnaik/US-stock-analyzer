@@ -26,7 +26,7 @@ from indicators import (
     get_extended_indicators, get_sparkline_data
 )
 from model import train_and_evaluate, predict_latest
-from charts import create_price_chart, create_rsi_chart, create_predictions_chart
+from charts import create_price_chart, create_rsi_chart, create_stochastic_chart, create_predictions_chart
 
 
 # =============================================================================
@@ -1432,11 +1432,15 @@ def render_analyzer_tab():
                 price_fig = create_price_chart(df, symbol, timeframe=timeframe)
                 st.plotly_chart(price_fig, use_container_width=True)
                 
+                # RSI and Stochastic charts
                 chart_col1, chart_col2 = st.columns(2)
                 with chart_col1:
                     st.plotly_chart(create_rsi_chart(df, symbol, timeframe=timeframe), use_container_width=True)
                 with chart_col2:
-                    st.plotly_chart(create_predictions_chart(df, symbol, model_results.predictions, model_results.probabilities, model_results.test_indices, threshold), use_container_width=True)
+                    st.plotly_chart(create_stochastic_chart(df, symbol, timeframe=timeframe), use_container_width=True)
+                
+                # Predictions chart (full width)
+                st.plotly_chart(create_predictions_chart(df, symbol, model_results.predictions, model_results.probabilities, model_results.test_indices, threshold), use_container_width=True)
     
     elif not selected_symbols:
         st.info("👆 Select stocks from the dropdown above and click 'Analyze' to begin.")
@@ -2127,15 +2131,17 @@ def render_screener_tab():
                                 price_fig = create_price_chart(chart_df, selected_symbol, timeframe=screener_timeframe)
                                 st.plotly_chart(price_fig, use_container_width=True)
                                 
-                                # RSI chart (same as Analyzer) - auto-zoomed based on timeframe
+                                # RSI and Stochastic charts - auto-zoomed based on timeframe
                                 chart_col1, chart_col2 = st.columns(2)
                                 with chart_col1:
                                     rsi_fig = create_rsi_chart(chart_df, selected_symbol, timeframe=screener_timeframe)
                                     st.plotly_chart(rsi_fig, use_container_width=True)
+                                with chart_col2:
+                                    stoch_fig = create_stochastic_chart(chart_df, selected_symbol, timeframe=screener_timeframe)
+                                    st.plotly_chart(stoch_fig, use_container_width=True)
                                 
                                 # ML Prediction section (if enabled)
                                 if enable_ml:
-                                    with chart_col2:
                                         try:
                                             ml_features = prepare_features(chart_df.copy(), horizon=ml_horizon, task="classification")
                                             feature_cols = get_feature_columns(ml_features)

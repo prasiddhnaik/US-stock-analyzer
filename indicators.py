@@ -6,7 +6,7 @@ Computes technical indicators using the 'ta' library.
 import pandas as pd
 import numpy as np
 from scipy.stats import percentileofscore
-from ta.momentum import RSIIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import SMAIndicator, EMAIndicator, MACD
 from ta.volatility import BollingerBands, AverageTrueRange
 
@@ -224,6 +224,29 @@ def compute_rsi(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_stochastic(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute Stochastic Oscillator (14, 3, 3).
+    
+    %K = 100 * (Close - Lowest Low) / (Highest High - Lowest Low)
+    %D = 3-period SMA of %K
+    
+    Overbought: > 80
+    Oversold: < 20
+    """
+    df = df.copy()
+    stoch = StochasticOscillator(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        window=14,        # %K period
+        smooth_window=3   # %D smoothing
+    )
+    df["stoch_k"] = stoch.stoch()         # %K line (fast)
+    df["stoch_d"] = stoch.stoch_signal()  # %D line (slow/signal)
+    return df
+
+
 def compute_macd(df: pd.DataFrame) -> pd.DataFrame:
     """Compute MACD indicator (12, 26, 9)."""
     df = df.copy()
@@ -282,6 +305,7 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = compute_sma(df)
     df = compute_ema(df)
     df = compute_rsi(df)
+    df = compute_stochastic(df)
     df = compute_macd(df)
     df = compute_bollinger_bands(df)
     df = compute_atr(df)

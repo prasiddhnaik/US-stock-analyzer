@@ -355,6 +355,124 @@ def create_rsi_chart(df: pd.DataFrame, symbol: str, timeframe: str = "1Day") -> 
     return fig
 
 
+def create_stochastic_chart(df: pd.DataFrame, symbol: str, timeframe: str = "1Day") -> go.Figure:
+    """
+    Create Stochastic Oscillator chart with overbought/oversold zones.
+    %K (fast) and %D (slow/signal) lines.
+    Overbought: > 80
+    Oversold: < 20
+    """
+    fig = go.Figure()
+    
+    if "stoch_k" not in df.columns or "stoch_d" not in df.columns:
+        fig.add_annotation(
+            text="Stochastic data not available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color=COLORS["text_secondary"])
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(15, 15, 25, 1)",
+            plot_bgcolor="rgba(15, 15, 25, 1)",
+            height=300
+        )
+        return fig
+    
+    # Overbought zone (80-100)
+    fig.add_hrect(
+        y0=80, y1=100,
+        fillcolor="rgba(239, 68, 68, 0.15)",
+        line_width=0,
+    )
+    
+    # Oversold zone (0-20)
+    fig.add_hrect(
+        y0=0, y1=20,
+        fillcolor="rgba(34, 197, 94, 0.15)",
+        line_width=0,
+    )
+    
+    # %K line (fast - blue)
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df["stoch_k"],
+        mode="lines",
+        line=dict(color="#3b82f6", width=2),
+        name="%K",
+        hovertemplate="%K: %{y:.1f}<extra></extra>"
+    ))
+    
+    # %D line (slow/signal - orange)
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df["stoch_d"],
+        mode="lines",
+        line=dict(color="#f97316", width=2),
+        name="%D",
+        hovertemplate="%D: %{y:.1f}<extra></extra>"
+    ))
+    
+    # Reference lines
+    fig.add_hline(y=80, line_dash="dash", line_color=COLORS["overbought"], line_width=1,
+                  annotation_text="80", annotation_position="right",
+                  annotation_font=dict(color=COLORS["overbought"], size=10))
+    fig.add_hline(y=20, line_dash="dash", line_color=COLORS["oversold"], line_width=1,
+                  annotation_text="20", annotation_position="right",
+                  annotation_font=dict(color=COLORS["oversold"], size=10))
+    fig.add_hline(y=50, line_dash="dot", line_color="#64748b", line_width=1)
+    
+    # Calculate zoom range based on timeframe
+    zoom_start, zoom_end = get_zoom_range(df, timeframe)
+    
+    # Build xaxis config with zoom range
+    xaxis_config = dict(
+        showgrid=True,
+        gridcolor=COLORS["grid"],
+        tickfont=dict(color=COLORS["text_secondary"])
+    )
+    
+    if zoom_start is not None and zoom_end is not None:
+        xaxis_config["range"] = [zoom_start, zoom_end]
+    
+    # Layout
+    fig.update_layout(
+        title=dict(
+            text=f"<b>{symbol}</b> Stochastic (14, 3, 3)",
+            x=0.5,
+            y=0.95,
+            font=dict(size=16, color=COLORS["text"])
+        ),
+        template="plotly_dark",
+        paper_bgcolor="rgba(15, 15, 25, 1)",
+        plot_bgcolor="rgba(15, 15, 25, 1)",
+        font=dict(family="Inter, sans-serif", color=COLORS["text"], size=12),
+        hovermode="x unified",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=10)
+        ),
+        height=300,
+        margin=dict(l=50, r=50, t=50, b=40),
+        xaxis=xaxis_config,
+        yaxis=dict(
+            title=dict(text="Stochastic", font=dict(color=COLORS["text"])),
+            range=[0, 100],
+            showgrid=True,
+            gridcolor=COLORS["grid"],
+            tickvals=[0, 20, 50, 80, 100],
+            tickfont=dict(color=COLORS["text_secondary"])
+        )
+    )
+    
+    return fig
+
+
 def create_predictions_chart(
     df: pd.DataFrame,
     symbol: str,
