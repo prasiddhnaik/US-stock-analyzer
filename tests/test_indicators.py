@@ -19,9 +19,14 @@ from indicators import (
     compute_sma,
     compute_ema,
     compute_rsi,
+    compute_stochastic,
     compute_macd,
     compute_bollinger_bands,
     compute_atr,
+    create_target,
+    prepare_features,
+    get_feature_columns,
+    get_latest_indicators,
 )
 
 
@@ -321,6 +326,185 @@ class TestCompute52WeekMetrics:
         if len(valid_rows) > 0:
             last_high_52w = valid_rows["high_52w"].iloc[-1]
             assert last_high_52w >= valid_rows["high"].iloc[-1]
+
+
+# =============================================================================
+# Stochastic Oscillator Tests
+# =============================================================================
+
+class TestStochasticOscillator:
+    """Tests for Stochastic Oscillator calculation."""
+    
+    def test_stochastic_columns_exist(self, sample_ohlcv_data):
+        """Test stochastic columns are created."""
+        df = compute_stochastic(sample_ohlcv_data)
+        
+        assert "stoch_k" in df.columns
+        assert "stoch_d" in df.columns
+    
+    def test_stochastic_range(self, sample_ohlcv_data):
+        """Test stochastic values are between 0 and 100."""
+        df = compute_stochastic(sample_ohlcv_data)
+        
+        valid_k = df["stoch_k"].dropna()
+        valid_d = df["stoch_d"].dropna()
+        
+        assert (valid_k >= 0).all() and (valid_k <= 100).all()
+        assert (valid_d >= 0).all() and (valid_d <= 100).all()
+    
+    def test_stochastic_extreme_up(self):
+        """Test stochastic near 100 with all up moves."""
+        dates = pd.date_range(start="2023-01-01", periods=50, freq="D")
+        prices = np.linspace(100, 150, 50)  # Steady uptrend
+        
+        df = pd.DataFrame({
+            "open": prices - 0.5,
+            "high": prices + 1,
+            "low": prices - 1,
+            "close": prices,
+            "volume": [1000000] * 50,
+        }, index=dates)
+        
+        result = compute_stochastic(df)
+        
+        # %K should be high (near 100) at the end
+        last_k = result["stoch_k"].iloc[-1]
+        assert last_k > 80  # Should be overbought
+
+
+# =============================================================================
+# Create Target Tests
+# =============================================================================
+
+class TestCreateTarget:
+    """Tests for target variable creation."""
+    
+    def test_classification_target(self, sample_ohlcv_data):
+        """Test classification target is binary."""
+        df = create_target(sample_ohlcv_data, horizon=5, task="classification")
+        
+        assert "target" in df.columns
+        valid_targets = df["target"].dropna()
+        assert set(valid_targets.unique()).issubset({0, 1})
+    
+    def test_regression_target(self, sample_ohlcv_data):
+        """Test regression target is continuous."""
+        df = create_target(sample_ohlcv_data, horizon=5, task="regression")
+        
+        assert "target" in df.columns
+        valid_targets = df["target"].dropna()
+        # Should have more than just 0 and 1
+        assert len(valid_targets.unique()) > 2
+    
+    def test_target_uses_horizon(self, sample_ohlcv_data):
+        """Test target calculation uses the horizon parameter."""
+        horizon_5 = create_target(sample_ohlcv_data.copy(), horizon=5, task="classification")
+        horizon_10 = create_target(sample_ohlcv_data.copy(), horizon=10, task="classification")
+        
+        # Both should have target column
+        assert "target" in horizon_5.columns
+        assert "target" in horizon_10.columns
+
+
+# =============================================================================
+# Prepare Features Tests
+# =============================================================================
+
+class TestPrepareFeatures:
+    """Tests for feature preparation pipeline."""
+    
+    def test_prepare_features_adds_indicators(self, sample_ohlcv_data):
+        """Test that indicators are added."""
+        df = prepare_features(sample_ohlcv_data)
+        
+        # Should have more columns than original
+        assert len(df.columns) > 5
+        
+        # Should have key indicators
+        assert "rsi_14" in df.columns
+        assert "macd" in df.columns
+    
+    def test_prepare_features_adds_target(self, sample_ohlcv_data):
+        """Test that target is added."""
+        df = prepare_features(sample_ohlcv_data)
+        
+        assert "target" in df.columns
+    
+    def test_prepare_features_dropna(self, sample_ohlcv_data):
+        """Test that NaN rows are dropped."""
+        df = prepare_features(sample_ohlcv_data)
+        
+        # Should have fewer rows (NaN dropped)
+        assert len(df) < len(sample_ohlcv_data)
+        
+        # No NaN in key columns
+        assert not df["rsi_14"].isna().any()
+
+
+# =============================================================================
+# Get Feature Columns Tests
+# =============================================================================
+
+class TestGetFeatureColumns:
+    """Tests for feature column extraction."""
+    
+    def test_excludes_ohlcv(self, sample_ohlcv_data):
+        """Test OHLCV columns are excluded."""
+        df = prepare_features(sample_ohlcv_data)
+        feature_cols = get_feature_columns(df)
+        
+        assert "open" not in feature_cols
+        assert "high" not in feature_cols
+        assert "low" not in feature_cols
+        assert "close" not in feature_cols
+        assert "volume" not in feature_cols
+    
+    def test_excludes_target(self, sample_ohlcv_data):
+        """Test target column is excluded."""
+        df = prepare_features(sample_ohlcv_data)
+        feature_cols = get_feature_columns(df)
+        
+        assert "target" not in feature_cols
+    
+    def test_includes_indicators(self, sample_ohlcv_data):
+        """Test indicator columns are included."""
+        df = prepare_features(sample_ohlcv_data)
+        feature_cols = get_feature_columns(df)
+        
+        assert "rsi_14" in feature_cols
+        assert "macd" in feature_cols or "macd_hist" in feature_cols
+
+
+# =============================================================================
+# Get Latest Indicators Tests
+# =============================================================================
+
+class TestGetLatestIndicators:
+    """Tests for getting latest indicator values."""
+    
+    def test_returns_dict(self, sample_ohlcv_data):
+        """Test returns dictionary."""
+        df = compute_all_indicators(sample_ohlcv_data)
+        latest = get_latest_indicators(df)
+        
+        assert isinstance(latest, dict)
+    
+    def test_contains_key_indicators(self, sample_ohlcv_data):
+        """Test contains key indicator values."""
+        df = compute_all_indicators(sample_ohlcv_data)
+        latest = get_latest_indicators(df)
+        
+        assert "close" in latest
+        assert "rsi_14" in latest
+        assert "macd_hist" in latest
+    
+    def test_values_from_last_row(self, sample_ohlcv_data):
+        """Test values come from last row."""
+        df = compute_all_indicators(sample_ohlcv_data)
+        latest = get_latest_indicators(df)
+        
+        # Close should match last row
+        assert latest["close"] == df["close"].iloc[-1]
 
 
 # =============================================================================

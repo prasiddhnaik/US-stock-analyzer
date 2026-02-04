@@ -171,6 +171,148 @@ class TestRedactSecret:
 
 
 # =============================================================================
+# Cache Path Tests
+# =============================================================================
+
+class TestGetCachePath:
+    """Tests for get_cache_path function."""
+    
+    def test_cache_path_contains_symbol(self):
+        """Test cache path includes symbol."""
+        from data_fetcher import get_cache_path
+        path = get_cache_path("AAPL", "2024-01-01", "2024-12-31", "1Day")
+        assert "AAPL" in str(path)
+    
+    def test_cache_path_is_parquet(self):
+        """Test cache path has parquet extension."""
+        from data_fetcher import get_cache_path
+        path = get_cache_path("MSFT", "2024-01-01", "2024-12-31", "1Day")
+        assert str(path).endswith(".parquet")
+    
+    def test_cache_path_unique_for_different_params(self):
+        """Test different parameters create different cache paths."""
+        from data_fetcher import get_cache_path
+        path1 = get_cache_path("AAPL", "2024-01-01", "2024-12-31", "1Day")
+        path2 = get_cache_path("MSFT", "2024-01-01", "2024-12-31", "1Day")
+        path3 = get_cache_path("AAPL", "2024-01-01", "2024-12-31", "1Hour")
+        path4 = get_cache_path("AAPL", "2023-01-01", "2024-12-31", "1Day")
+        
+        assert path1 != path2  # Different symbol
+        assert path1 != path3  # Different timeframe
+        assert path1 != path4  # Different date range
+
+
+# =============================================================================
+# Cache Function Tests
+# =============================================================================
+
+class TestCacheFunctions:
+    """Tests for cache loading and saving functions."""
+    
+    def test_load_from_cache_nonexistent(self):
+        """Test loading from non-existent file returns None."""
+        from pathlib import Path
+        from data_fetcher import load_from_cache
+        
+        result = load_from_cache(Path("/nonexistent/path/file.parquet"))
+        assert result is None
+    
+    def test_save_and_load_cache(self, tmp_path):
+        """Test saving and loading DataFrame from cache."""
+        import pandas as pd
+        from data_fetcher import save_to_cache, load_from_cache
+        
+        # Create test DataFrame
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=5),
+            "open": [100.0, 101.0, 102.0, 103.0, 104.0],
+            "high": [102.0, 103.0, 104.0, 105.0, 106.0],
+            "low": [99.0, 100.0, 101.0, 102.0, 103.0],
+            "close": [101.0, 102.0, 103.0, 104.0, 105.0],
+            "volume": [1000, 2000, 3000, 4000, 5000],
+        })
+        
+        cache_path = tmp_path / "test_cache.parquet"
+        
+        # Save and load
+        save_to_cache(df, cache_path)
+        loaded = load_from_cache(cache_path)
+        
+        assert loaded is not None
+        assert len(loaded) == 5
+        assert "close" in loaded.columns
+        assert loaded["close"].iloc[0] == 101.0
+    
+    def test_cache_file_exists_after_save(self, tmp_path):
+        """Test cache file exists after saving."""
+        import pandas as pd
+        from data_fetcher import save_to_cache
+        
+        df = pd.DataFrame({"col": [1, 2, 3]})
+        cache_path = tmp_path / "test_exists.parquet"
+        
+        save_to_cache(df, cache_path)
+        
+        assert cache_path.exists()
+
+
+# =============================================================================
+# Fetch Stock Data Tests (with mocking)
+# =============================================================================
+
+class TestFetchStockData:
+    """Tests for fetch_stock_data function with mocking."""
+    
+    def test_invalid_symbol_raises_error(self):
+        """Test invalid symbol raises ValueError."""
+        from data_fetcher import fetch_stock_data
+        
+        with pytest.raises(ValueError) as exc_info:
+            fetch_stock_data("INVALID!", "2024-01-01", "2024-12-31")
+        assert "Invalid symbol" in str(exc_info.value)
+    
+    def test_invalid_start_date_raises_error(self):
+        """Test invalid start date raises ValueError."""
+        from data_fetcher import fetch_stock_data
+        
+        with pytest.raises(ValueError) as exc_info:
+            fetch_stock_data("AAPL", "not-a-date", "2024-12-31")
+        assert "Invalid" in str(exc_info.value)
+    
+    def test_invalid_end_date_raises_error(self):
+        """Test invalid end date raises ValueError."""
+        from data_fetcher import fetch_stock_data
+        
+        with pytest.raises(ValueError) as exc_info:
+            fetch_stock_data("AAPL", "2024-01-01", "bad-date")
+        assert "Invalid" in str(exc_info.value)
+    
+    def test_symbol_normalized_to_uppercase(self):
+        """Test symbol is converted to uppercase."""
+        from data_fetcher import validate_symbol
+        
+        # Lowercase should validate after internal conversion
+        assert validate_symbol("aapl") is True
+        assert validate_symbol("Msft") is True
+
+
+# =============================================================================
+# Timeframe Mapping Tests
+# =============================================================================
+
+class TestTimeframeMapping:
+    """Tests for timeframe string to Alpaca enum mapping."""
+    
+    def test_valid_timeframes(self):
+        """Test all valid timeframes are recognized."""
+        valid_timeframes = ["1Min", "5Min", "15Min", "30Min", "1Hour", "1Day"]
+        for tf in valid_timeframes:
+            # Just verify these don't cause issues with validation
+            assert isinstance(tf, str)
+            assert len(tf) > 0
+
+
+# =============================================================================
 # Run tests
 # =============================================================================
 

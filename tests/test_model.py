@@ -18,6 +18,11 @@ from model import (
     create_regression_pipeline,
     compute_classification_metrics,
     compute_regression_metrics,
+    train_model,
+    predict_latest,
+    train_and_evaluate,
+    get_feature_importance,
+    ModelResults,
 )
 
 
@@ -280,6 +285,264 @@ class TestRegressionMetrics:
         
         assert metrics["mae"] >= 0
         assert metrics["rmse"] >= 0
+
+
+# =============================================================================
+# Train Model Tests
+# =============================================================================
+
+class TestTrainModel:
+    """Tests for train_model function."""
+    
+    @pytest.fixture
+    def ml_ready_dataframe(self):
+        """Create DataFrame ready for ML training."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        return pd.DataFrame({
+            "feature1": np.random.randn(100),
+            "feature2": np.random.randn(100),
+            "feature3": np.random.randn(100),
+            "target": np.random.randint(0, 2, 100),
+        }, index=dates)
+    
+    def test_train_model_classification(self, ml_ready_dataframe):
+        """Test training classification model."""
+        feature_cols = ["feature1", "feature2", "feature3"]
+        
+        results = train_model(ml_ready_dataframe, feature_cols, task="classification")
+        
+        assert results is not None
+        assert isinstance(results, ModelResults)
+        assert results.task == "classification"
+        assert len(results.predictions) > 0
+        assert results.probabilities is not None
+    
+    def test_train_model_regression(self, ml_ready_dataframe):
+        """Test training regression model."""
+        # Create continuous target
+        ml_ready_dataframe["target"] = np.random.randn(100)
+        feature_cols = ["feature1", "feature2", "feature3"]
+        
+        results = train_model(ml_ready_dataframe, feature_cols, task="regression")
+        
+        assert results is not None
+        assert results.task == "regression"
+        assert results.probabilities is None  # No probabilities for regression
+    
+    def test_train_model_metrics_exist(self, ml_ready_dataframe):
+        """Test that metrics are computed."""
+        feature_cols = ["feature1", "feature2"]
+        results = train_model(ml_ready_dataframe, feature_cols, task="classification")
+        
+        assert "accuracy" in results.metrics
+        assert "precision" in results.metrics
+        assert "recall" in results.metrics
+        assert "f1" in results.metrics
+    
+    def test_train_model_returns_model(self, ml_ready_dataframe):
+        """Test that trained model is returned."""
+        feature_cols = ["feature1", "feature2"]
+        results = train_model(ml_ready_dataframe, feature_cols)
+        
+        assert results.model is not None
+        # Model should be able to predict
+        X_sample = ml_ready_dataframe[feature_cols].iloc[:5].values
+        predictions = results.model.predict(X_sample)
+        assert len(predictions) == 5
+
+
+# =============================================================================
+# Predict Latest Tests
+# =============================================================================
+
+class TestPredictLatest:
+    """Tests for predict_latest function."""
+    
+    @pytest.fixture
+    def trained_model(self):
+        """Create and train a model for testing predictions."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        df = pd.DataFrame({
+            "feature1": np.random.randn(100),
+            "feature2": np.random.randn(100),
+            "target": np.random.randint(0, 2, 100),
+        }, index=dates)
+        
+        feature_cols = ["feature1", "feature2"]
+        results = train_model(df, feature_cols, task="classification")
+        return df, feature_cols, results.model
+    
+    def test_predict_latest_classification(self, trained_model):
+        """Test predicting latest point for classification."""
+        df, feature_cols, model = trained_model
+        
+        prediction, probability = predict_latest(df, feature_cols, model, task="classification")
+        
+        assert prediction in [0, 1]
+        assert 0 <= probability <= 1
+    
+    def test_predict_latest_regression(self):
+        """Test predicting latest point for regression."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        df = pd.DataFrame({
+            "feature1": np.random.randn(100),
+            "feature2": np.random.randn(100),
+            "target": np.random.randn(100),  # Continuous
+        }, index=dates)
+        
+        feature_cols = ["feature1", "feature2"]
+        results = train_model(df, feature_cols, task="regression")
+        
+        prediction, probability = predict_latest(df, feature_cols, results.model, task="regression")
+        
+        assert isinstance(prediction, float)
+        assert probability is None  # No probability for regression
+    
+    def test_predict_latest_empty_df(self, trained_model):
+        """Test predicting with empty DataFrame."""
+        _, feature_cols, model = trained_model
+        
+        empty_df = pd.DataFrame(columns=feature_cols)
+        prediction, probability = predict_latest(empty_df, feature_cols, model, task="classification")
+        
+        assert prediction == 0
+        assert probability == 0.5
+
+
+# =============================================================================
+# Train and Evaluate Tests
+# =============================================================================
+
+class TestTrainAndEvaluate:
+    """Tests for train_and_evaluate function."""
+    
+    @pytest.fixture
+    def full_dataframe(self):
+        """Create full DataFrame for end-to-end testing."""
+        dates = pd.date_range(start="2023-01-01", periods=200, freq="D")
+        np.random.seed(42)
+        
+        return pd.DataFrame({
+            "feature1": np.random.randn(200),
+            "feature2": np.random.randn(200),
+            "feature3": np.random.randn(200),
+            "target": np.random.randint(0, 2, 200),
+        }, index=dates)
+    
+    def test_train_and_evaluate_success(self, full_dataframe):
+        """Test successful training and evaluation."""
+        feature_cols = ["feature1", "feature2", "feature3"]
+        
+        results = train_and_evaluate("AAPL", full_dataframe, feature_cols)
+        
+        assert results is not None
+        assert results.symbol == "AAPL"
+        assert len(results.predictions) > 0
+    
+    def test_train_and_evaluate_insufficient_data(self):
+        """Test with insufficient data returns None."""
+        dates = pd.date_range(start="2023-01-01", periods=20, freq="D")  # Too few
+        np.random.seed(42)
+        
+        small_df = pd.DataFrame({
+            "feature1": np.random.randn(20),
+            "feature2": np.random.randn(20),
+            "target": np.random.randint(0, 2, 20),
+        }, index=dates)
+        
+        feature_cols = ["feature1", "feature2"]
+        results = train_and_evaluate("AAPL", small_df, feature_cols)
+        
+        assert results is None  # Not enough data
+    
+    def test_train_and_evaluate_regression(self, full_dataframe):
+        """Test regression task."""
+        full_dataframe["target"] = np.random.randn(200)  # Continuous
+        feature_cols = ["feature1", "feature2"]
+        
+        results = train_and_evaluate("MSFT", full_dataframe, feature_cols, task="regression")
+        
+        assert results is not None
+        assert results.task == "regression"
+        assert "mae" in results.metrics
+        assert "rmse" in results.metrics
+
+
+# =============================================================================
+# Feature Importance Tests
+# =============================================================================
+
+class TestGetFeatureImportance:
+    """Tests for get_feature_importance function."""
+    
+    def test_feature_importance_classification(self):
+        """Test feature importance for classification."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        df = pd.DataFrame({
+            "feature_a": np.random.randn(100),
+            "feature_b": np.random.randn(100),
+            "target": np.random.randint(0, 2, 100),
+        }, index=dates)
+        
+        feature_cols = ["feature_a", "feature_b"]
+        results = train_model(df, feature_cols, task="classification")
+        
+        importance = get_feature_importance(results.model, feature_cols, task="classification")
+        
+        assert "feature_a" in importance
+        assert "feature_b" in importance
+        assert len(importance) == 2
+    
+    def test_feature_importance_regression(self):
+        """Test feature importance for regression."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        df = pd.DataFrame({
+            "feat1": np.random.randn(100),
+            "feat2": np.random.randn(100),
+            "target": np.random.randn(100),
+        }, index=dates)
+        
+        feature_cols = ["feat1", "feat2"]
+        results = train_model(df, feature_cols, task="regression")
+        
+        importance = get_feature_importance(results.model, feature_cols, task="regression")
+        
+        assert len(importance) == 2
+    
+    def test_feature_importance_sorted(self):
+        """Test that feature importance is sorted by absolute value."""
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
+        np.random.seed(42)
+        
+        df = pd.DataFrame({
+            "f1": np.random.randn(100),
+            "f2": np.random.randn(100),
+            "f3": np.random.randn(100),
+            "target": np.random.randint(0, 2, 100),
+        }, index=dates)
+        
+        feature_cols = ["f1", "f2", "f3"]
+        results = train_model(df, feature_cols)
+        
+        importance = get_feature_importance(results.model, feature_cols)
+        
+        # Check it's a dict
+        assert isinstance(importance, dict)
+        
+        # Check values are sorted by absolute value (descending)
+        values = list(importance.values())
+        abs_values = [abs(v) for v in values]
+        assert abs_values == sorted(abs_values, reverse=True)
 
 
 # =============================================================================
