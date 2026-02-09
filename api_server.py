@@ -47,6 +47,14 @@ from charts import create_predictions_chart, create_price_chart, create_rsi_char
 # Import existing modules
 from data_fetcher import fetch_stock_data, get_tradeable_symbols
 from indicators import compute_all_indicators, get_feature_columns, get_latest_indicators, prepare_features
+from fundamental_fetcher import (
+    get_stock_info,
+    get_multiple_stocks_info,
+    apply_fundamental_filters,
+    get_us_sectors,
+    get_stock_categories,
+    ALL_US_SYMBOLS,
+)
 from input_validator import (
     MultipleValidationErrors,
     ValidationError,
@@ -863,6 +871,208 @@ async def screen_stocks(request: ScreenerRequest):
         total_scanned=len(symbols),
         filters_applied=filters_applied,
     )
+
+
+# =============================================================================
+# Fundamental Screener Models
+# =============================================================================
+
+
+class FundamentalFilters(BaseModel):
+    """Fundamental screener filter criteria."""
+    
+    marketCapMin: Optional[float] = Field(default=None, description="Min market cap in billions")
+    marketCapMax: Optional[float] = Field(default=None, description="Max market cap in billions")
+    priceMin: Optional[float] = Field(default=None, ge=0, description="Min stock price")
+    priceMax: Optional[float] = Field(default=None, description="Max stock price")
+    peRatioMin: Optional[float] = Field(default=None, description="Min P/E ratio")
+    peRatioMax: Optional[float] = Field(default=None, description="Max P/E ratio")
+    roeMin: Optional[float] = Field(default=None, description="Min ROE %")
+    roeMax: Optional[float] = Field(default=None, description="Max ROE %")
+    debtToEquityMin: Optional[float] = Field(default=None, ge=0, description="Min Debt/Equity")
+    debtToEquityMax: Optional[float] = Field(default=None, description="Max Debt/Equity")
+    dividendYieldMin: Optional[float] = Field(default=None, ge=0, description="Min dividend yield %")
+    dividendYieldMax: Optional[float] = Field(default=None, description="Max dividend yield %")
+    revenueGrowthMin: Optional[float] = Field(default=None, description="Min revenue growth %")
+    revenueGrowthMax: Optional[float] = Field(default=None, description="Max revenue growth %")
+    earningsGrowthMin: Optional[float] = Field(default=None, description="Min earnings growth %")
+    earningsGrowthMax: Optional[float] = Field(default=None, description="Max earnings growth %")
+    priceToBookMin: Optional[float] = Field(default=None, ge=0, description="Min P/B ratio")
+    priceToBookMax: Optional[float] = Field(default=None, description="Max P/B ratio")
+    volumeMin: Optional[int] = Field(default=None, ge=0, description="Min daily volume")
+    sector: Optional[str] = Field(default="All Sectors", description="Sector filter")
+    oneYearReturnMin: Optional[float] = Field(default=None, description="Min 1Y return %")
+    oneYearReturnMax: Optional[float] = Field(default=None, description="Max 1Y return %")
+
+
+class FundamentalScreenerRequest(BaseModel):
+    """Request model for fundamental stock screener."""
+    
+    symbols: Optional[List[str]] = Field(
+        default=None, 
+        max_length=100, 
+        description="List of symbols to scan (uses default universe if not provided)"
+    )
+    filters: FundamentalFilters = Field(default_factory=FundamentalFilters)
+    
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, v):
+        if v is None:
+            return None
+        sanitized = [sanitize_symbol(s) for s in v if s]
+        return sanitized[:100]  # Limit to 100 symbols
+
+
+class FundamentalStockResult(BaseModel):
+    """Single stock result from fundamental screener."""
+    
+    symbol: str
+    companyName: Optional[str] = None
+    sector: Optional[str] = None
+    marketCap: Optional[float] = None
+    currentPrice: Optional[float] = None
+    peRatio: Optional[float] = None
+    roe: Optional[float] = None
+    debtToEquity: Optional[float] = None
+    dividendYield: Optional[float] = None
+    oneYearReturn: Optional[float] = None
+    volume: Optional[int] = None
+    priceToBook: Optional[float] = None
+    revenueGrowth: Optional[float] = None
+    earningsGrowth: Optional[float] = None
+    eps: Optional[float] = None
+    high52Week: Optional[float] = None
+    low52Week: Optional[float] = None
+    profitMargin: Optional[float] = None
+    beta: Optional[float] = None
+
+
+class FundamentalScreenerResponse(BaseModel):
+    """Response model for fundamental screener."""
+    
+    matches: List[FundamentalStockResult]
+    errors: List[ScreenerError]
+    total_scanned: int
+    filters_applied: List[str]
+
+
+# =============================================================================
+# Fundamental Screener Endpoint
+# =============================================================================
+
+
+@app.post("/api/fundamental-screener", response_model=FundamentalScreenerResponse, tags=["Screener"])
+async def screen_stocks_fundamental(request: FundamentalScreenerRequest):
+    """
+    Scan stocks against fundamental criteria (P/E, ROE, Market Cap, etc.).
+    
+    Returns matching stocks with their fundamental metrics.
+    Uses Yahoo Finance for data.
+    
+    **Rate Limit**: 5 requests per minute per IP/user.
+    """
+    # Get symbols to scan - use full universe if not specified
+    # FMP bulk API is fast, can handle more symbols
+    symbols = request.symbols if request.symbols else ALL_US_SYMBOLS
+    symbols = symbols[:100]  # FMP bulk fetch is fast
+    
+    # Build list of active filters for display
+    filters_applied = []
+    f = request.filters
+    
+    if f.marketCapMin is not None:
+        filters_applied.append(f"Market Cap > ${f.marketCapMin}B")
+    if f.marketCapMax is not None:
+        filters_applied.append(f"Market Cap < ${f.marketCapMax}B")
+    if f.peRatioMin is not None:
+        filters_applied.append(f"P/E > {f.peRatioMin}")
+    if f.peRatioMax is not None:
+        filters_applied.append(f"P/E < {f.peRatioMax}")
+    if f.roeMin is not None:
+        filters_applied.append(f"ROE > {f.roeMin}%")
+    if f.roeMax is not None:
+        filters_applied.append(f"ROE < {f.roeMax}%")
+    if f.debtToEquityMax is not None:
+        filters_applied.append(f"D/E < {f.debtToEquityMax}")
+    if f.dividendYieldMin is not None:
+        filters_applied.append(f"Div Yield > {f.dividendYieldMin}%")
+    if f.revenueGrowthMin is not None:
+        filters_applied.append(f"Rev Growth > {f.revenueGrowthMin}%")
+    if f.earningsGrowthMin is not None:
+        filters_applied.append(f"Earnings Growth > {f.earningsGrowthMin}%")
+    if f.sector and f.sector != "All Sectors":
+        filters_applied.append(f"Sector: {f.sector}")
+    
+    # Fetch fundamental data
+    scan_errors = []
+    
+    try:
+        # Use async to not block
+        loop = asyncio.get_event_loop()
+        stocks_data = await loop.run_in_executor(
+            executor, 
+            lambda: get_multiple_stocks_info(symbols, max_workers=15)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch stock data"
+        )
+    
+    # Track errors for symbols that failed
+    fetched_symbols = {s['symbol'] for s in stocks_data}
+    for symbol in symbols:
+        if symbol not in fetched_symbols:
+            scan_errors.append(ScreenerError(symbol=symbol, error="Data fetch failed"))
+    
+    # Apply filters
+    filter_dict = f.model_dump(exclude_none=True)
+    filtered_stocks = apply_fundamental_filters(stocks_data, filter_dict)
+    
+    # Convert to response format
+    matches = []
+    for stock in filtered_stocks:
+        matches.append(FundamentalStockResult(
+            symbol=stock.get('symbol', ''),
+            companyName=stock.get('companyName'),
+            sector=stock.get('sector'),
+            marketCap=stock.get('marketCap'),
+            currentPrice=stock.get('currentPrice'),
+            peRatio=stock.get('peRatio'),
+            roe=stock.get('roe'),
+            debtToEquity=stock.get('debtToEquity'),
+            dividendYield=stock.get('dividendYield'),
+            oneYearReturn=stock.get('oneYearReturn'),
+            volume=int(stock.get('volume')) if stock.get('volume') else None,
+            priceToBook=stock.get('priceToBook'),
+            revenueGrowth=stock.get('revenueGrowth'),
+            earningsGrowth=stock.get('earningsGrowth'),
+            eps=stock.get('eps'),
+            high52Week=stock.get('high52Week'),
+            low52Week=stock.get('low52Week'),
+            profitMargin=stock.get('profitMargin'),
+            beta=stock.get('beta'),
+        ))
+    
+    return FundamentalScreenerResponse(
+        matches=matches,
+        errors=scan_errors,
+        total_scanned=len(symbols),
+        filters_applied=filters_applied,
+    )
+
+
+@app.get("/api/us-sectors", tags=["Data"])
+async def get_sectors():
+    """Get list of US stock sectors for filtering."""
+    return {"sectors": get_us_sectors()}
+
+
+@app.get("/api/stock-categories", tags=["Data"])
+async def get_categories():
+    """Get stock categories/universe for the screener."""
+    return {"categories": get_stock_categories()}
 
 
 # =============================================================================
